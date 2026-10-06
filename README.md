@@ -1,49 +1,47 @@
 # bibliotecario-openhands-workflow
 
-Reusable OpenHands plugin implementing a native sequential software-engineering workflow:
+Reusable OpenHands plugin implementing a native, fail-closed sequential workflow:
 
 ```text
 USER REQUEST
     |
     v
-planner-qwen        (inherits the parent Qwen LLM; read + PLAN.md only)
+planner-qwen        (inherits parent Qwen; read + PLAN.md only)
     |
     v
-PLAN.md
+PLAN.md + READY
     |
     v
-executor-spark      (LLM profile: spark2.5-4b; terminal + file_editor)
+executor-spark      (spark2.5-4b; terminal + file_editor)
     |
     v
 deterministic validation
     |
     v
-reviewer-qwen       (inherits the parent Qwen LLM; read-only)
+reviewer-qwen       (inherits parent Qwen; read-only)
     |
     +---- APPROVED ----> STOP
     |
     +---- REJECTED ----> executor-spark fix -> reviewer-qwen
 ```
 
-The workflow is exposed as the plugin command:
+The workflow is exposed as:
 
 ```text
 /bibliotecario-openhands-workflow:run <request>
 ```
 
+The plugin also ships an always-on orchestration skill, so when the plugin is
+attached to a conversation an ordinary software-engineering request is instructed
+to follow the same PLAN -> ACT -> REVIEW state machine even if the slash command
+is omitted.
+
 ## OpenHands compatibility
 
-Designed for the native plugin/sub-agent mechanisms available in OpenHands software-agent-sdk 1.53.x.
+Designed for the native plugin/sub-agent/hook mechanisms in OpenHands
+software-agent-sdk 1.53.x.
 
-The plugin uses:
-- plugin-provided file agents;
-- `task_tool_set` delegation;
-- a namespaced slash command;
-- per-sub-agent iteration limits;
-- native per-agent `PreToolUse` hooks;
-- shared workspace state through `PLAN.md`.
-
-No OpenHands source patch is required by the plugin itself.
+No OpenHands source patch is required.
 
 ## Install source
 
@@ -51,91 +49,99 @@ No OpenHands source patch is required by the plugin itself.
 github:rickinca84/bibliotecario-openhands-workflow
 ```
 
-or:
+## Parent Agent Profile: important OpenHands 1.53 scope behavior
 
-```text
-https://github.com/rickinca84/bibliotecario-openhands-workflow.git
-```
+OpenHands 1.53 automatically scopes delegated sub-agent tools to the tools selected
+on an Agent Profile when that profile uses an explicit custom tool list.
 
-## Parent agent requirements
-
-For strict orchestration, the parent Agent Profile should expose only:
+Therefore the parent profile must FORMALLY include the union of tools required by
+its delegates:
 
 ```text
 task_tool_set
 task_tracker
-```
-
-Do not expose `terminal`, `file_editor`, `switch_llm`, or Model Router tools
-to the parent when using this workflow. The parent must orchestrate rather than
-perform phase work itself.
-
-## Phase capabilities
-
-### planner-qwen
-
-Tools:
-
-```text
-glob
-grep
-file_editor
-```
-
-A native `PreToolUse` hook permits `file_editor:view` everywhere but permits
-write operations only when the target is exactly `PLAN.md`. Hook execution is
-fail-closed: if the guard command itself fails, the tool call is blocked.
-
-The planner has no terminal.
-
-### executor-spark
-
-Tools:
-
-```text
 terminal
 file_editor
-```
-
-This is the only phase allowed to implement and run deterministic validation.
-
-### reviewer-qwen
-
-Tools:
-
-```text
 glob
 grep
-file_editor
 ```
 
-A native `PreToolUse` hook allows only `file_editor:view`. All file writes are
-denied. The reviewer has no terminal and therefore evaluates the executor's
-recorded deterministic evidence plus the implementation itself.
+Do not enable `switch_llm` or Model Router for this workflow.
 
-## LLM profiles
+Although `terminal`, `file_editor`, `glob`, and `grep` must be present on
+the parent profile for native sub-agent scoping, plugin-level PreToolUse hooks
+deterministically DENY the parent from invoking those tools directly. They remain
+available to the delegated agents, whose conversations use their own per-agent
+hook configuration rather than inheriting the parent's plugin hooks.
 
-`planner-qwen` and `reviewer-qwen` use `model: inherit`, so with the intended
-parent they run on Qwen.
-
-`executor-spark` explicitly requests:
+The effective capability split is therefore:
 
 ```text
-spark2.5-4b
+PARENT
+  effective: task delegation + task tracking only
+
+PLANNER
+  glob + grep + file_editor
+  writes only PLAN.md
+
+EXECUTOR
+  terminal + file_editor
+
+REVIEWER
+  glob + grep + file_editor
+  file_editor is read-only
 ```
 
-The OpenHands conversation runtime must therefore be able to resolve an LLM profile
-with that exact name. If the isolated Docker runtime cannot resolve the profile,
-the workflow is required to stop and report the executor failure. It must not fall
-back to the parent or another agent.
+## Automatic Spark profile bootstrap
 
-## Safety properties
+The isolated Docker conversation runtime has its own LLM profile store. A profile
+saved in the outer Canvas server is not automatically available there.
 
-- Existing/native/upstream/installable solutions are checked before new code.
-- PLAN.md freezes requirements and deterministic validation before execution.
-- Planner writes are deterministically confined to PLAN.md.
-- The executor is forbidden from weakening the acceptance oracle.
-- Reviewer writes are deterministically blocked.
-- Tool-level phase failures are fail-closed; the parent may not substitute itself.
-- PASS requires deterministic validation plus independent review.
-- Replan cycles are capped at two; correction cycles are capped at three.
+On SessionStart this plugin uses the native OpenHands `LLMProfileStore` API to
+create the local runtime profile `spark2.5-4b` if it is absent:
+
+```text
+model:    openai/spark2.5-4b
+base_url: http://host.docker.internal:30000/v1
+api_key:  local
+```
+
+The key is a non-secret placeholder for the local OpenAI-compatible endpoint.
+An existing runtime profile with the same name is left untouched.
+
+Before an `executor-spark` task starts, a native PreToolUse hook verifies that
+the profile exists. If it does not, the executor delegation is denied and the
+workflow fails closed instead of falling back to Qwen.
+
+## Planner bounds
+
+The planner:
+- has no terminal;
+- may read the repository;
+- may write only `PLAN.md`;
+- has a six-iteration run budget;
+- must return either `PLANNING_RESULT: READY` or
+  `PLANNING_RESULT: NEEDS_DECOMPOSITION`;
+- must not create auxiliary planning documents.
+
+## Executor bounds
+
+The Spark executor is the only phase allowed to modify implementation files and
+run deterministic validation. It has an 18-iteration run budget and may not alter
+`PLAN.md` or weaken the acceptance oracle.
+
+## Reviewer bounds
+
+The reviewer is read-only. It independently inspects PLAN.md, implementation,
+tests, and executor validation evidence. It cannot modify files and does not claim
+to rerun commands.
+
+## Fail-closed behavior
+
+A final PASS requires:
+1. deterministic validation success under PLAN.md; and
+2. reviewer-qwen returning APPROVED.
+
+Missing agent/model/profile, runtime errors, run-limit termination, and task
+infrastructure failures stop the workflow. The parent is never allowed to
+substitute itself for a failed phase.
