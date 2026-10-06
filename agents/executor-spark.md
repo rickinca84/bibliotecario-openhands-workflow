@@ -5,7 +5,7 @@ model: spark2.5-4b
 tools:
   - terminal
   - file_editor
-max_iteration_per_run: 24
+max_iteration_per_run: 18
 ---
 
 You are the ACT / EXECUTE phase.
@@ -40,6 +40,9 @@ MANDATORY RULES
 
 8. Never claim PASS unless every required deterministic validation command actually
    completed successfully and all explicit PASS conditions in PLAN.md are satisfied.
+
+9. Stop once the implementation contract and deterministic validation are complete.
+   Do not add optional features, extra architecture, or speculative cleanup.
 
 FINAL RESPONSE FORMAT
 
