@@ -1,0 +1,44 @@
+{
+  "session_start": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "command": "python3 -c 'from openhands.sdk import LLM; from openhands.sdk.llm.llm_profile_store import LLMProfileStore; from pydantic import SecretStr; s=LLMProfileStore(); names=[n.removesuffix(\".json\") for n in s.list()]; None if \"spark2.5-4b\" in names else s.save(\"spark2.5-4b\", LLM(model=\"openai/spark2.5-4b\", base_url=\"http://host.docker.internal:30000/v1\", api_key=SecretStr(\"local\"), usage_id=\"spark2.5-4b\"), include_secrets=True)'",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "user_prompt_submit": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "command": "python3 -c 'import json; print(json.dumps({\"additionalContext\":\"BIBLIOTECARIO WORKFLOW IS ATTACHED. For software-engineering work, the parent is an orchestrator only. Use planner-qwen -> executor-spark -> reviewer-qwen through the task tool. Never implement, test, inspect, or review directly in the parent. Fail closed if a required phase cannot start.\"}))'",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "pre_tool_use": [
+    {
+      "matcher": "terminal|file_editor|glob|grep",
+      "hooks": [
+        {
+          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Bibliotecario parent is orchestration-only; repository tools belong to delegated phase agents\"}))'",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "matcher": "task",
+      "hooks": [
+        {
+          "command": "python3 -c 'import json,sys,os; from openhands.sdk.llm.llm_profile_store import LLMProfileStore; e=json.load(sys.stdin); i=e.get(\"tool_input\") or {}; a=i.get(\"subagent_type\"); allowed={\"planner-qwen\",\"executor-spark\",\"reviewer-qwen\"}; ok=a in allowed; reason=\"Only Bibliotecario phase agents may be delegated\"; p=os.path.join(e.get(\"working_dir\") or os.getcwd(),\"PLAN.md\"); exists=os.path.isfile(p); profiles=[n.removesuffix(\".json\") for n in LLMProfileStore().list()]; ok=ok and (a!=\"executor-spark\" or (exists and \"spark2.5-4b\" in profiles)); reason=reason if a not in allowed else (\"executor-spark requires PLAN.md and runtime profile spark2.5-4b\" if a==\"executor-spark\" and not (exists and \"spark2.5-4b\" in profiles) else \"Bibliotecario delegation allowed\"); print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))' || exit 2",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
