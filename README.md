@@ -31,10 +31,7 @@ The workflow is exposed as:
 /bibliotecario-openhands-workflow:run <request>
 ```
 
-The plugin also ships an always-on orchestration skill, so when the plugin is
-attached to a conversation an ordinary software-engineering request is instructed
-to follow the same PLAN -> ACT -> REVIEW state machine even if the slash command
-is omitted.
+While the plugin is attached, a native UserPromptSubmit hook injects the orchestration rule into each user turn. This makes ordinary software-engineering requests follow the same PLAN -> ACT -> REVIEW discipline even when the slash command is omitted.
 
 ## OpenHands compatibility
 
@@ -70,9 +67,10 @@ Do not enable `switch_llm` or Model Router for this workflow.
 
 Although `terminal`, `file_editor`, `glob`, and `grep` must be present on
 the parent profile for native sub-agent scoping, plugin-level PreToolUse hooks
-deterministically DENY the parent from invoking those tools directly. They remain
-available to the delegated agents, whose conversations use their own per-agent
-hook configuration rather than inheriting the parent's plugin hooks.
+deterministically DENY the parent from invoking those tools directly. The same
+hook layer also blocks delegation to agent types outside `planner-qwen`,
+`executor-spark`, and `reviewer-qwen`. These plugin hooks apply to the parent
+conversation; delegated phase agents use their own per-agent hook configuration.
 
 The effective capability split is therefore:
 
