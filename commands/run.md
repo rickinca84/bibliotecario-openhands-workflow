@@ -1,9 +1,6 @@
 ---
 description: Run the Bibliotecario PLAN -> ACT -> REVIEW workflow using Qwen planner, Spark executor, and Qwen reviewer.
 argument-hint: <software engineering request>
-allowed-tools:
-  - task_tool_set
-  - task_tracker
 ---
 
 Execute the following fixed software-engineering state machine for:
@@ -17,6 +14,7 @@ You are an orchestrator only.
 Do not implement code yourself.
 Do not edit files yourself.
 Do not run implementation commands yourself.
+Do not inspect the repository directly when a phase agent can do so.
 Do not substitute another agent type for a failed phase.
 Do not use switch_llm or route_task_to_model.
 Use only the named delegated sub-agents below.
@@ -42,15 +40,19 @@ Call the task tool with:
 subagent_type="planner-qwen"
 
 Give it the user's complete request and tell it to inspect the current workspace
-and create PLAN.md.
+and create exactly one planning artifact: PLAN.md.
 
 Wait for it to finish.
 
 If the planner task itself errors or stops abnormally, STOP.
 Do not retry automatically.
 
-If the planner returns a normal result but explicitly reports an unresolved ambiguity
-that prevents a complete contract, STOP and report the ambiguity.
+If it returns:
+PLANNING_RESULT: NEEDS_DECOMPOSITION
+STOP and report the proposed decomposition. Do not execute partial work.
+
+Proceed only if it returns:
+PLANNING_RESULT: READY
 
 PHASE 2 — EXECUTE
 
@@ -71,7 +73,7 @@ Do not ask planner-qwen, reviewer-qwen, general-purpose, or yourself to implemen
 If executor-spark completes normally with:
 BLOCKED: REPLAN_REQUIRED
 then call planner-qwen once with the exact blocking ambiguity and instruct it to
-revise PLAN.md only. After a successful replan, call executor-spark again.
+revise PLAN.md only. After a successful READY replan, call executor-spark again.
 
 Maximum replan cycles: 2.
 
@@ -108,7 +110,7 @@ STOP and report the unresolved defects.
 
 STATE TRANSITION RULES
 
-PLAN -> EXECUTE only after a complete PLAN.md exists.
+PLAN -> EXECUTE only after PLANNING_RESULT: READY.
 EXECUTE -> REVIEW only after executor-spark completes normally.
 REVIEW -> EXECUTE only for concrete reviewer defects.
 EXECUTE -> PLAN only for explicit BLOCKED: REPLAN_REQUIRED.
