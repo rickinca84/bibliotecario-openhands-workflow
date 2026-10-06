@@ -6,7 +6,7 @@ tools:
   - glob
   - grep
   - file_editor
-max_iteration_per_run: 10
+max_iteration_per_run: 8
 hooks:
   pre_tool_use:
     - matcher: "file_editor"
