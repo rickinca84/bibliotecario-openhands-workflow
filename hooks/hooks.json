@@ -4,7 +4,7 @@
       "matcher": "*",
       "hooks": [
         {
-          "command": "python3 -c 'from openhands.sdk import LLM; from openhands.sdk.llm.llm_profile_store import LLMProfileStore; from pydantic import SecretStr; s=LLMProfileStore(); names=[n.removesuffix(\".json\") for n in s.list()]; None if \"spark2.5-4b\" in names else s.save(\"spark2.5-4b\", LLM(model=\"openai/spark2.5-4b\", base_url=\"http://host.docker.internal:30000/v1\", api_key=SecretStr(\"local\"), usage_id=\"spark2.5-4b\"), include_secrets=True)'",
+          "command": "python3 -c 'import json,os,pathlib; root=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\")); d=root/\"profiles\"; d.mkdir(parents=True,exist_ok=True); p=d/\"spark2.5-4b.json\"; data={\"model\":\"openai/spark2.5-4b\",\"api_key\":\"local\",\"base_url\":\"http://host.docker.internal:30000/v1\",\"usage_id\":\"spark2.5-4b\",\"schema_version\":1}; p.exists() or p.write_text(json.dumps(data,indent=2)+\"\\n\",encoding=\"utf-8\")'",
           "timeout": 10
         }
       ]
@@ -15,7 +15,7 @@
       "matcher": "*",
       "hooks": [
         {
-          "command": "python3 -c 'import json; print(json.dumps({\"additionalContext\":\"BIBLIOTECARIO WORKFLOW IS ATTACHED. For software-engineering work, the parent is an orchestrator only. Use planner-qwen -> executor-spark -> reviewer-qwen through the task tool. Never implement, test, inspect, or review directly in the parent. Fail closed if a required phase cannot start.\"}))'",
+          "command": "python3 -c 'import json; print(json.dumps({\"additionalContext\":\"BIBLIOTECARIO ORCHESTRATION IS MANDATORY. The specialized subagents planner-qwen, executor-spark, and reviewer-qwen are already registered by the attached plugin. Do not create agent definitions. For a software-engineering request, your FIRST TOOL ACTION MUST be task with subagent_type=planner-qwen and the complete user request. Do not plan, inspect, edit, implement, test, or review directly in the parent. After PLANNING_RESULT: READY call executor-spark; after execution call reviewer-qwen. Fail closed if any required delegation cannot start.\"}))'",
           "timeout": 5
         }
       ]
@@ -26,7 +26,7 @@
       "matcher": "terminal|file_editor|glob|grep",
       "hooks": [
         {
-          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Bibliotecario parent is orchestration-only; repository tools belong to delegated phase agents\"}))'",
+          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Parent is orchestration-only. Call task with subagent_type=planner-qwen instead of doing repository work directly.\"}))'",
           "timeout": 5
         }
       ]
@@ -35,7 +35,7 @@
       "matcher": "task",
       "hooks": [
         {
-          "command": "python3 -c 'import json,sys,os; from openhands.sdk.llm.llm_profile_store import LLMProfileStore; e=json.load(sys.stdin); i=e.get(\"tool_input\") or {}; a=i.get(\"subagent_type\"); allowed={\"planner-qwen\",\"executor-spark\",\"reviewer-qwen\"}; ok=a in allowed; reason=\"Only Bibliotecario phase agents may be delegated\"; p=os.path.join(e.get(\"working_dir\") or os.getcwd(),\"PLAN.md\"); exists=os.path.isfile(p); profiles=[n.removesuffix(\".json\") for n in LLMProfileStore().list()]; ok=ok and (a!=\"executor-spark\" or (exists and \"spark2.5-4b\" in profiles)); reason=reason if a not in allowed else (\"executor-spark requires PLAN.md and runtime profile spark2.5-4b\" if a==\"executor-spark\" and not (exists and \"spark2.5-4b\" in profiles) else \"Bibliotecario delegation allowed\"); print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))' || exit 2",
+          "command": "python3 -c 'import json,sys,os,pathlib; e=json.load(sys.stdin); i=e.get(\"tool_input\") or {}; a=i.get(\"subagent_type\"); allowed={\"planner-qwen\",\"executor-spark\",\"reviewer-qwen\"}; ok=a in allowed; wd=e.get(\"working_dir\") or os.getcwd(); plan=os.path.isfile(os.path.join(wd,\"PLAN.md\")); root=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\")); spark=(root/\"profiles\"/\"spark2.5-4b.json\").is_file(); ok=ok and (a!=\"executor-spark\" or (plan and spark)); reason=\"Bibliotecario delegation allowed\" if ok else (\"Only planner-qwen, executor-spark, and reviewer-qwen may be delegated\" if a not in allowed else \"executor-spark requires PLAN.md and runtime profile spark2.5-4b\"); print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))' || exit 2",
           "timeout": 5
         }
       ]
