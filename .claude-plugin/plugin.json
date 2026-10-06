@@ -1,6 +1,6 @@
 {
   "name": "bibliotecario-openhands-workflow",
-  "version": "0.1.0",
-  "description": "Reusable OpenHands PLAN -> ACT -> REVIEW workflow with Qwen planning/review and Spark execution.",
+  "version": "0.2.0",
+  "description": "Fail-closed OpenHands PLAN -> ACT -> REVIEW workflow with Qwen planning/review and Spark execution.",
   "entry_command": "run"
 }
