@@ -1,5 +1,7 @@
 # bibliotecario-openhands-workflow
 
+Version 0.3.0 capability-contract update.
+
 Reusable OpenHands plugin implementing a native, fail-closed sequential workflow:
 
 ```text
