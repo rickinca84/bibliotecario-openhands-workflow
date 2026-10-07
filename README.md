@@ -8,10 +8,10 @@ Reusable OpenHands plugin implementing a native, fail-closed sequential workflow
 USER REQUEST
     |
     v
-planner-qwen        (inherits parent Qwen; read + PLAN.md only)
+planner-qwen        (inherits parent Qwen; native planning tools)
     |
     v
-PLAN.md + READY
+.agents_tmp/PLAN.md + READY
     |
     v
 executor-spark      (spark2.5-4b; terminal + file_editor)
@@ -20,7 +20,7 @@ executor-spark      (spark2.5-4b; terminal + file_editor)
 deterministic validation
     |
     v
-reviewer-qwen       (inherits parent Qwen; read-only)
+reviewer-qwen       (inherits parent Qwen; native read-only tools)
     |
     +---- APPROVED ----> STOP
     |
@@ -63,13 +63,17 @@ terminal
 file_editor
 glob
 grep
+planning_file_editor
+read_file
 ```
 
 Do not enable `switch_llm` or Model Router for this workflow.
 
-Although `terminal`, `file_editor`, `glob`, and `grep` must be present on
-the parent profile for native sub-agent scoping, plugin-level PreToolUse hooks
-deterministically DENY the parent from invoking those tools directly. The same
+Although the delegate tool union must be present on the parent profile for native
+sub-agent scoping, plugin-level PreToolUse hooks deterministically DENY the parent
+from invoking repository tools directly. `planning_file_editor` and `read_file`
+are native internal OpenHands tools; they may not appear in the normal Canvas
+tool picker but can be named in the stored Agent Profile. The same
 hook layer also blocks delegation to agent types outside `planner-qwen`,
 `executor-spark`, and `reviewer-qwen`. These plugin hooks apply to the parent
 conversation; delegated phase agents use their own per-agent hook configuration.
@@ -81,15 +85,16 @@ PARENT
   effective: task delegation + task tracking only
 
 PLANNER
-  glob + grep + file_editor
-  writes only PLAN.md
+  glob + grep + planning_file_editor
+  native tool writes only .agents_tmp/PLAN.md
 
 EXECUTOR
   terminal + file_editor
+  reads .agents_tmp/PLAN.md and implements the contract
 
 REVIEWER
-  glob + grep + file_editor
-  file_editor is read-only
+  glob + grep + read_file
+  read-only by construction
 ```
 
 ## Automatic Spark profile bootstrap
@@ -116,10 +121,12 @@ workflow fails closed instead of falling back to Qwen.
 ## Planner bounds
 
 The planner:
+- uses the native OpenHands planning toolset: `glob`, `grep`, and
+  `planning_file_editor`;
 - has no terminal;
 - may read the repository;
-- may write only `PLAN.md`;
-- has a six-iteration run budget;
+- may write only the native plan file `.agents_tmp/PLAN.md`;
+- has a ten-iteration run budget;
 - must return either `PLANNING_RESULT: READY` or
   `PLANNING_RESULT: NEEDS_DECOMPOSITION`;
 - must not create auxiliary planning documents.
@@ -128,18 +135,19 @@ The planner:
 
 The Spark executor is the only phase allowed to modify implementation files and
 run deterministic validation. It has an 18-iteration run budget and may not alter
-`PLAN.md` or weaken the acceptance oracle.
+`.agents_tmp/PLAN.md` or weaken the acceptance oracle.
 
 ## Reviewer bounds
 
-The reviewer is read-only. It independently inspects PLAN.md, implementation,
-tests, and executor validation evidence. It cannot modify files and does not claim
-to rerun commands.
+The reviewer is read-only by construction. It uses native `glob`, `grep`, and
+`read_file`, independently inspecting `.agents_tmp/PLAN.md`, implementation,
+tests, and executor validation evidence. It has no write-capable file tool and no
+terminal, so it cannot modify files or claim to rerun commands.
 
 ## Fail-closed behavior
 
 A final PASS requires:
-1. deterministic validation success under PLAN.md; and
+1. deterministic validation success under .agents_tmp/PLAN.md; and
 2. reviewer-qwen returning APPROVED.
 
 Missing agent/model/profile, runtime errors, run-limit termination, and task
