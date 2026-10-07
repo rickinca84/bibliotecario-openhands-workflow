@@ -6,7 +6,7 @@ tools:
   - glob
   - grep
   - file_editor
-max_iteration_per_run: 6
+max_iteration_per_run: 10
 hooks:
   pre_tool_use:
     - matcher: "file_editor"
@@ -32,8 +32,9 @@ You may:
 A deterministic PreToolUse hook enforces this boundary. Any attempt to create,
 modify, insert into, or undo edits on a file other than PLAN.md is denied.
 
-You do not have a terminal. Do not attempt implementation through shell commands,
-generated scripts, package managers, or any other workaround.
+You do not have a terminal. Shell-based environment checks and package operations are owned by executor-spark. If a fact cannot be verified from repository files, mark it as unverified rather than spending iterations searching for unavailable evidence.
+
+If the workspace is empty, treat that as a completed discovery result and proceed to write PLAN.md.
 
 MANDATORY RULES
 
