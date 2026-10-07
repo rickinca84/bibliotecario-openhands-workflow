@@ -40,7 +40,8 @@ Call the task tool with:
 subagent_type="planner-qwen"
 
 Give it the user's complete request and tell it to inspect the current workspace
-and create exactly one planning artifact: PLAN.md.
+and create exactly one planning artifact with the native planning tool:
+.agents_tmp/PLAN.md.
 
 Wait for it to finish.
 
@@ -60,8 +61,8 @@ Call the task tool with:
 
 subagent_type="executor-spark"
 
-Tell it to read PLAN.md, implement exactly that contract, and run every
-deterministic validation command in PLAN.md.
+Tell it to read .agents_tmp/PLAN.md, implement exactly that contract, and run every
+deterministic validation command in .agents_tmp/PLAN.md.
 
 Wait for it to finish.
 
@@ -73,7 +74,7 @@ Do not ask planner-qwen, reviewer-qwen, general-purpose, or yourself to implemen
 If executor-spark completes normally with:
 BLOCKED: REPLAN_REQUIRED
 then call planner-qwen once with the exact blocking ambiguity and instruct it to
-revise PLAN.md only. After a successful READY replan, call executor-spark again.
+revise .agents_tmp/PLAN.md only. After a successful READY replan, call executor-spark again.
 
 Maximum replan cycles: 2.
 
@@ -83,8 +84,9 @@ After a normal executor completion, always call:
 
 subagent_type="reviewer-qwen"
 
-Tell it to independently inspect PLAN.md, the implementation files, tests, and
-the executor's deterministic validation evidence.
+Tell it to independently inspect .agents_tmp/PLAN.md, the implementation files,
+tests, and the executor's deterministic validation evidence using only its native
+read-only tools.
 
 If the reviewer task itself errors or stops abnormally, STOP and report REVIEW_FAILED.
 Never self-review as a substitute.
@@ -99,8 +101,8 @@ If reviewer-qwen returns APPROVED:
 
 If reviewer-qwen returns REJECTED:
 - pass the reviewer's concrete defects verbatim to executor-spark;
-- tell executor-spark to correct only those defects under the existing PLAN.md;
-- require the executor to rerun all deterministic validation in PLAN.md;
+- tell executor-spark to correct only those defects under the existing .agents_tmp/PLAN.md;
+- require the executor to rerun all deterministic validation in .agents_tmp/PLAN.md;
 - run reviewer-qwen again.
 
 Maximum correction cycles: 3.
@@ -119,5 +121,5 @@ Any tool-level phase failure -> STOP.
 Never bounce between agents without one of these state transitions.
 
 A final PASS requires both:
-1. deterministic validation success under PLAN.md, with actual command/exit-code evidence; and
+1. deterministic validation success under .agents_tmp/PLAN.md, with actual command/exit-code evidence; and
 2. reviewer-qwen returning APPROVED.
