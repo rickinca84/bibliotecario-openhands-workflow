@@ -23,10 +23,10 @@
   ],
   "pre_tool_use": [
     {
-      "matcher": "terminal|file_editor|glob|grep|route_task_to_model|ClassifyAndSwitchLLMTool|switch_llm",
+      "matcher": "terminal|file_editor|glob|grep|planning_file_editor|read_file|route_task_to_model|ClassifyAndSwitchLLMTool|switch_llm",
       "hooks": [
         {
-          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Parent is orchestration-only. Do not use repository tools, Model Router, or LLM switching. Call task with subagent_type=planner-qwen; on any delegated task error, stop fail-closed.\"}))'",
+          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Parent is orchestration-only. Do not use repository tools (including native planning/read tools), Model Router, or LLM switching. Call task with subagent_type=planner-qwen; on any delegated task error, stop fail-closed.\"}))'",
           "timeout": 5
         }
       ]
@@ -35,7 +35,7 @@
       "matcher": "task",
       "hooks": [
         {
-          "command": "python3 -c 'import json,sys,os,pathlib; e=json.load(sys.stdin); i=e.get(\"tool_input\") or {}; a=i.get(\"subagent_type\"); allowed={\"planner-qwen\",\"executor-spark\",\"reviewer-qwen\"}; ok=a in allowed; wd=e.get(\"working_dir\") or os.getcwd(); plan=os.path.isfile(os.path.join(wd,\"PLAN.md\")); root=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\")); spark=(root/\"profiles\"/\"spark2.5-4b.json\").is_file(); ok=ok and (a!=\"executor-spark\" or (plan and spark)); reason=\"Bibliotecario delegation allowed\" if ok else (\"Only planner-qwen, executor-spark, and reviewer-qwen may be delegated\" if a not in allowed else \"executor-spark requires PLAN.md and runtime profile spark2.5-4b\"); print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))' || exit 2",
+          "command": "python3 -c 'import json,sys,os,pathlib; e=json.load(sys.stdin); i=e.get(\"tool_input\") or {}; a=i.get(\"subagent_type\"); allowed={\"planner-qwen\",\"executor-spark\",\"reviewer-qwen\"}; ok=a in allowed; wd=e.get(\"working_dir\") or os.getcwd(); plan=os.path.isfile(os.path.join(wd,\".agents_tmp\",\"PLAN.md\")); root=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\")); spark=(root/\"profiles\"/\"spark2.5-4b.json\").is_file(); ok=ok and (a!=\"executor-spark\" or (plan and spark)); reason=\"Bibliotecario delegation allowed\" if ok else (\"Only planner-qwen, executor-spark, and reviewer-qwen may be delegated\" if a not in allowed else \"executor-spark requires .agents_tmp/PLAN.md and runtime profile spark2.5-4b\"); print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))' || exit 2",
           "timeout": 5
         }
       ]
