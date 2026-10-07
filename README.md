@@ -76,7 +76,8 @@ are native internal OpenHands tools; they may not appear in the normal Canvas
 tool picker but can be named in the stored Agent Profile. The same
 hook layer also blocks delegation to agent types outside `planner-qwen`,
 `executor-spark`, and `reviewer-qwen`. These plugin hooks apply to the parent
-conversation; delegated phase agents use their own per-agent hook configuration.
+conversation. Planner and reviewer rely on narrower native OpenHands tools rather
+than custom file-write hooks; executor uses the standard native execution tools.
 
 The effective capability split is therefore:
 
