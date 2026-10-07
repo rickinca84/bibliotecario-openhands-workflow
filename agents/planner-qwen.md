@@ -5,15 +5,8 @@ model: inherit
 tools:
   - glob
   - grep
-  - file_editor
+  - planning_planning_file_editor
 max_iteration_per_run: 10
-hooks:
-  pre_tool_use:
-    - matcher: "file_editor"
-      hooks:
-        - command: >-
-            python3 -c 'import json,sys,os; e=json.load(sys.stdin); i=e.get("tool_input") or {}; c=i.get("command"); p=i.get("path"); wd=e.get("working_dir") or os.getcwd(); target=os.path.abspath(os.path.join(wd,"PLAN.md")); path=os.path.abspath(p) if isinstance(p,str) else ""; allow=(c=="view") or (c in {"create","str_replace","insert","undo_edit"} and path==target); print(json.dumps({"decision":"allow" if allow else "deny","reason":"planner-qwen may only view files and write PLAN.md"}))' || exit 2
-          timeout: 5
 ---
 
 You are the THINK / PLAN phase of a software-engineering workflow.
@@ -26,7 +19,7 @@ CAPABILITY BOUNDARY
 You may:
 - discover files with glob;
 - search file contents with grep;
-- inspect files/directories with file_editor view;
+- inspect files/directories with planning_planning_file_editor view;
 - create or modify only PLAN.md.
 
 A deterministic PreToolUse hook enforces this boundary. Any attempt to create,
@@ -65,7 +58,7 @@ MANDATORY RULES
    reasons and proposed sub-tasks in PLAN.md and return
    PLANNING_RESULT: NEEDS_DECOMPOSITION.
 
-WRITE PLAN.md IN THE CURRENT WORKSPACE.
+WRITE THE PLAN IN .agents_tmp/PLAN.md USING planning_file_editor.
 
 PLAN.md must contain:
 
