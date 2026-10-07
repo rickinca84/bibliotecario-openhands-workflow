@@ -23,10 +23,10 @@
   ],
   "pre_tool_use": [
     {
-      "matcher": "terminal|file_editor|glob|grep|route_task_to_model|ClassifyAndSwitchLLMTool|switch_llm",
+      "matcher": "terminal|file_editor|glob|grep|planning_file_editor|read_file|route_task_to_model|ClassifyAndSwitchLLMTool|switch_llm",
       "hooks": [
         {
-          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Parent is orchestration-only. Do not use repository tools, Model Router, or LLM switching. Call task with subagent_type=planner-qwen; on any delegated task error, stop fail-closed.\"}))'",
+          "command": "python3 -c 'import json; print(json.dumps({\"decision\":\"deny\",\"reason\":\"Parent is orchestration-only. Do not use repository tools (including native planning/read tools), Model Router, or LLM switching. Call task with subagent_type=planner-qwen; on any delegated task error, stop fail-closed.\"}))'",
           "timeout": 5
         }
       ]
