@@ -53,6 +53,8 @@ class V052ContractTests(unittest.TestCase):
         self.assertIn("subprocess.run(argv,shell=False,cwd=source_root", validator)
         self.assertNotIn("subprocess.run(cmd,shell=True", validator)
         self.assertIn('"overall":"ENVIRONMENT_ERROR"', validator)
+        self.assertIn('PYTEST_ADDOPTS', validator)
+        self.assertIn('-p no:cacheprovider', validator)
 
     def test_policy_hooks_fail_closed_on_runtime_errors(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
