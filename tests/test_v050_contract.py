@@ -8,10 +8,10 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-class V050ContractTests(unittest.TestCase):
+class V051ContractTests(unittest.TestCase):
     def test_manifest_is_v050(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertEqual(manifest["version"], "0.5.1")
         self.assertIn("deterministic INTAKE", manifest["description"])
 
     def test_llm_intake_agent_removed(self):
@@ -29,10 +29,24 @@ class V050ContractTests(unittest.TestCase):
         self.assertRegex(frontmatter, r"(?m)^\s*- read_file\s*$")
         self.assertIn("INTAKE.json", text)
 
-    def test_state_machine_has_no_intake_subagent_or_fake_resume(self):
+    def test_state_machine_has_no_intake_subagent_and_documents_fresh_resume(self):
         text = (ROOT / "commands" / "run.md").read_text()
         self.assertNotIn('subagent_type="intake-spark"', text)
         self.assertIn("OMIT `resume`", text)
+
+    def test_hooks_allow_empty_resume_but_reject_nonempty_resume(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        task_hook = next(
+            item for item in hooks["pre_tool_use"] if item.get("matcher") == "task"
+        )["hooks"][0]["command"]
+        self.assertIn('resume not in (None, "")', task_hook)
+
+    def test_executor_parent_dirs_are_scaffolded_deterministically(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        task_hook = next(
+            item for item in hooks["pre_tool_use"] if item.get("matcher") == "task"
+        )["hooks"][0]["command"]
+        self.assertIn("directory.mkdir(parents=True,exist_ok=True)", task_hook)
 
     def test_parent_has_post_task_and_stop_gates(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
