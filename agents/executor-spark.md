@@ -57,6 +57,7 @@ MANDATORY RULES
    - `.agents_tmp/PLAN.md`
    - `.agents_tmp/INTAKE.json`
    - `.agents_tmp/VALIDATION.json`
+   - `.agents_tmp/BASELINE.json`
 
 6. Selected destructive Git/system operations are mechanically denied. Do not attempt
    alternate syntax to evade those checks.
