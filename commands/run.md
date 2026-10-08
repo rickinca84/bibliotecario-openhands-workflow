@@ -1,5 +1,5 @@
 ---
-description: Run Bibliotecario v0.5 deterministic INTAKE -> PLAN -> ACT -> VALIDATE -> REVIEW.
+description: Run Bibliotecario v0.5.2 deterministic INTAKE -> PLAN -> ACT -> VALIDATE -> REVIEW.
 argument-hint: <software engineering request>
 ---
 
@@ -14,7 +14,7 @@ switch LLMs, or substitute another agent.
 
 PHASE 0 — DETERMINISTIC INTAKE
 
-The UserPromptSubmit hook has already produced `.agents_tmp/INTAKE.json` without an
+The fail-closed UserPromptSubmit hook has already produced `.agents_tmp/INTAKE.json` without an
 LLM. If the hook reports INTAKE_BLOCKED, STOP and report the exact missing source.
 
 PHASE 1 — PLAN
