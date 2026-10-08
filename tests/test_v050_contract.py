@@ -68,6 +68,23 @@ class V052ContractTests(unittest.TestCase):
                 f"policy hook is not fail-closed: {command[:120]}",
             )
 
+    def test_intake_records_validator_capabilities(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        intake = hooks["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn('"environment":{"executables":executables,"python_modules":python_modules}', intake)
+        self.assertIn('"pytest"', intake)
+        self.assertIn("shutil.which", intake)
+
+    def test_parent_denies_direct_native_executor_tools(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        matcher = next(
+            item["matcher"]
+            for item in hooks["pre_tool_use"]
+            if "terminal|file_editor" in item.get("matcher", "")
+        )
+        self.assertIn("write_file", matcher)
+        self.assertIn("edit", matcher)
+
     def test_parent_has_post_task_and_stop_gates(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
         self.assertIn("post_tool_use", hooks)
