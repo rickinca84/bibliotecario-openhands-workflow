@@ -1,6 +1,6 @@
 {
   "name": "bibliotecario-openhands-workflow",
-  "version": "0.5.0",
-  "description": "Fail-closed OpenHands deterministic INTAKE -> PLAN -> ACT -> VALIDATE -> REVIEW workflow with Spark execution and Qwen planning/review.",
+  "version": "0.5.1",
+  "description": "Fail-closed OpenHands deterministic INTAKE -> PLAN -> ACT -> VALIDATE -> REVIEW workflow with deterministic mutable-path scaffolding, Spark execution, and Qwen planning/review.",
   "entry_command": "run"
 }
