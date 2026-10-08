@@ -63,7 +63,9 @@ them:
 - native agent/plugin hooks for capability enforcement.
 
 The plugin adds only the orchestration and policy that OpenHands does not provide as
-this specific workflow.
+this specific workflow. A SessionStart hook snapshots pre-existing dirty/untracked
+workspace files into `.agents_tmp/BASELINE.json`, so later scope validation measures
+the task delta rather than mistaking uploaded/non-Git input files for executor changes.
 
 ## Install source
 
@@ -202,15 +204,16 @@ not PASS.
 
 Immediately before every `reviewer-qwen` task, a parent `PreToolUse` hook:
 
-1. parses the current plan;
-2. validates the validation JSON schema/bounds;
-3. rejects dangerous validation commands;
-4. executes every validation command from the workspace root;
-5. records actual exit codes, timeouts, and bounded stdout/stderr tails;
-6. computes SHA-256 of the plan;
-7. obtains the current Git changed-file set;
-8. checks those changes against `# Mutable paths` and `# Forbidden paths`;
-9. atomically writes `.agents_tmp/VALIDATION.json`.
+1. loads the SessionStart workspace baseline and current intake source root;
+2. parses the current plan;
+3. validates the validation JSON schema/bounds;
+4. rejects dangerous or Git-mutating validation commands;
+5. executes every validation command from the workspace root;
+6. records actual exit codes, timeouts, and bounded stdout/stderr tails;
+7. computes SHA-256 of the plan;
+8. obtains the current Git changed-file set and compares it to the SessionStart baseline;
+9. checks only the resulting task delta against `# Mutable paths` and `# Forbidden paths`;
+10. atomically writes `.agents_tmp/VALIDATION.json`.
 
 The hook runs outside executor-spark and reviewer-qwen.
 
