@@ -10,7 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-class V061ContractTests(unittest.TestCase):
+class V062ContractTests(unittest.TestCase):
     def hooks(self):
         return json.loads((ROOT / "hooks" / "hooks.json").read_text())
 
@@ -25,6 +25,15 @@ class V061ContractTests(unittest.TestCase):
             if x.get("matcher") == "finish"
         )["hooks"][0]["command"]
 
+    def post_finish_hook(self):
+        return next(
+            x for x in self.hooks()["post_tool_use"]
+            if x.get("matcher") == "finish"
+        )["hooks"][0]["command"]
+
+    def stop_hook(self):
+        return self.hooks()["stop"][0]["hooks"][0]["command"]
+
     def run_hook(self, command, payload, cwd):
         return subprocess.run(
             ["bash", "-lc", command],
@@ -35,9 +44,9 @@ class V061ContractTests(unittest.TestCase):
             env={**os.environ, "OH_PERSISTENCE_DIR": str(pathlib.Path(cwd) / ".openhands")},
         )
 
-    def test_manifest_is_v061(self):
+    def test_manifest_is_v062(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertEqual(manifest["version"], "0.6.1")
+        self.assertEqual(manifest["version"], "0.6.2")
         self.assertIn("dynamic work graph", manifest["description"])
 
     def test_no_authoritative_plan_md(self):
@@ -304,6 +313,164 @@ class V061ContractTests(unittest.TestCase):
             good_out = json.loads(good.stdout)
             self.assertEqual(good_out["decision"], "allow")
 
+            # PreToolUse only authorizes the message. It must not create proof.
+            self.assertFalse((tmp / "FAILURE_REPORT.json").exists())
+
+            post = self.run_hook(
+                self.post_finish_hook(),
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": expected
+                    },
+                    "tool_response": {
+                        "kind": "FinishObservation",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": expected,
+                            }
+                        ],
+                    },
+                },
+                wd,
+            )
+            self.assertEqual(post.returncode, 0, post.stderr)
+
+            report_path = tmp / "FAILURE_REPORT.json"
+            self.assertTrue(report_path.is_file())
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report["proof"], "PostToolUse:finish")
+            self.assertEqual(
+                report["terminal_sha256"],
+                hashlib.sha256(
+                    (tmp / "TERMINAL_FAILURE.json").read_bytes()
+                ).hexdigest(),
+            )
+            self.assertEqual(report["message"], expected)
+
+            stop = self.run_hook(
+                self.stop_hook(),
+                {
+                    "working_dir": str(wd),
+                },
+                wd,
+            )
+            self.assertEqual(stop.returncode, 0, stop.stderr)
+            stop_out = json.loads(stop.stdout)
+            self.assertEqual(stop_out["decision"], "allow")
+
+    def test_stop_denies_direct_completion_after_terminal_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            failure = {
+                "phase": "executor",
+                "reason": "executor failed or returned invalid result",
+            }
+            (tmp / "TERMINAL_FAILURE.json").write_text(
+                json.dumps(failure),
+                encoding="utf-8",
+            )
+
+            p = self.run_hook(
+                self.stop_hook(),
+                {
+                    "working_dir": str(wd),
+                },
+                wd,
+            )
+
+            self.assertEqual(p.returncode, 0, p.stderr)
+            out = json.loads(p.stdout)
+
+            self.assertEqual(out["decision"], "deny")
+            self.assertIn(
+                "terminal failure requires a verified native finish report",
+                out["reason"],
+            )
+            self.assertIn(
+                "BIBLIOTECARIO_FAILURE: executor: "
+                "executor failed or returned invalid result",
+                out["additionalContext"],
+            )
+            self.assertFalse((tmp / "FAILURE_REPORT.json").exists())
+
+    def test_stop_rejects_stale_failure_report_hash(self):
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            terminal = tmp / "TERMINAL_FAILURE.json"
+            terminal.write_text(
+                json.dumps({
+                    "phase": "executor",
+                    "reason": "first failure",
+                }),
+                encoding="utf-8",
+            )
+
+            expected = (
+                "BIBLIOTECARIO_FAILURE: executor: first failure"
+            )
+
+            pre = self.run_hook(
+                self.finish_hook(),
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": expected,
+                    },
+                },
+                wd,
+            )
+            self.assertEqual(pre.returncode, 0, pre.stderr)
+            self.assertEqual(json.loads(pre.stdout)["decision"], "allow")
+
+            post = self.run_hook(
+                self.post_finish_hook(),
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": expected,
+                    },
+                    "tool_response": {
+                        "kind": "FinishObservation",
+                    },
+                },
+                wd,
+            )
+            self.assertEqual(post.returncode, 0, post.stderr)
+            self.assertTrue((tmp / "FAILURE_REPORT.json").is_file())
+
+            # Change the authoritative terminal failure after the proof.
+            terminal.write_text(
+                json.dumps({
+                    "phase": "executor",
+                    "reason": "second failure",
+                }),
+                encoding="utf-8",
+            )
+
+            stop = self.run_hook(
+                self.stop_hook(),
+                {
+                    "working_dir": str(wd),
+                },
+                wd,
+            )
+            self.assertEqual(stop.returncode, 0, stop.stderr)
+
+            out = json.loads(stop.stdout)
+            self.assertEqual(out["decision"], "deny")
+            self.assertIn(
+                "BIBLIOTECARIO_FAILURE: executor: second failure",
+                out["additionalContext"],
+            )
+
     def test_finish_denies_unverified_success(self):
         command = self.finish_hook()
 
@@ -327,9 +494,10 @@ class V061ContractTests(unittest.TestCase):
             self.assertEqual(out["decision"], "deny")
             self.assertIn("verified final success", out["reason"])
 
-    def test_intake_ignores_agents_tmp_for_dirty_probe(self):
+    def test_intake_ignores_agents_tmp_and_clears_failure_report(self):
         intake = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
         self.assertIn(":(exclude).agents_tmp/**", intake)
+        self.assertIn("FAILURE_REPORT.json", intake)
 
     def test_policy_hooks_are_fail_closed(self):
         hooks = self.hooks()

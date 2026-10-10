@@ -1,5 +1,5 @@
 ---
-description: Run Bibliotecario v0.6.1 deterministic intake, dynamic work graph, bounded execution, validation, and final review.
+description: Run Bibliotecario v0.6.2 deterministic intake, dynamic work graph, bounded execution, validation, and final review.
 argument-hint: <software engineering request>
 ---
 
@@ -31,5 +31,8 @@ review, switch LLMs, or substitute another agent.
 13. REVIEW REJECTED -> planner adds a corrective node; do not rewrite completed nodes.
 14. Stop only when graph completion, global deterministic PASS, locked CONTRACT, and
     reviewer APPROVED provenance all agree.
+15. If TERMINAL_FAILURE.json exists, never claim success. A terminal failure may stop
+    only after native `finish` completes with the exact deterministic failure message
+    requested by the hooks.
 
 Never accept an LLM claim as deterministic PASS.

@@ -1,8 +1,8 @@
 # bibliotecario-openhands-workflow
 
-## v0.6.1 — Dynamic Verified Work Graph
+## v0.6.2 — Dynamic Verified Work Graph
 
-v0.6.1 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
+v0.6.2 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
 dynamic graph suitable for both small fixes and larger repositories.
 
 ```text
@@ -136,7 +136,9 @@ No Model Router or `switch_llm`.
 - semantic reviewer never runs on deterministic failure;
 - executor text is not authoritative: normal native task completion only hands work to deterministic validation;
 - parent `finish` cannot claim success before final deterministic PASS + reviewer provenance;
-- terminal failures can be finished only with a deterministic failure report;
+- terminal failures require native `finish` with the exact deterministic failure report;
+- `PostToolUse(finish)` records `FAILURE_REPORT.json`, hash-bound to the current terminal failure;
+- direct assistant completion or a stale failure proof cannot bypass the Stop gate;
 - final stop requires current contract + graph + validation + review hashes to agree.
 
 ### Install source
