@@ -1,5 +1,5 @@
 ---
-description: Run Bibliotecario v0.6.0 deterministic intake, dynamic work graph, bounded execution, validation, and final review.
+description: Run Bibliotecario v0.6.1 deterministic intake, dynamic work graph, bounded execution, validation, and final review.
 argument-hint: <software engineering request>
 ---
 
@@ -17,7 +17,9 @@ review, switch LLMs, or substitute another agent.
 3. Planner creates/updates CONTRACT.json, WORK_GRAPH.json, CURRENT_WORK_ITEM.json.
 4. Call a fresh `executor-spark` task and omit `resume`.
 5. Parent PreToolUse validates the JSON bundle BEFORE Spark and snapshots a work-item baseline.
-6. After `EXECUTION_RESULT: READY_FOR_VALIDATION`, attempt a fresh `reviewer-qwen`.
+6. After executor-spark completes normally, attempt a fresh `reviewer-qwen`.
+   Native OpenHands `TaskObservation.status=completed` is sufficient for this handoff;
+   `EXECUTION_RESULT: READY_FOR_VALIDATION` remains an optional explicit marker.
 7. Its parent PreToolUse first runs deterministic scope and work-item validation.
 8. WORK_ITEM FAIL -> reviewer is denied; call executor-spark again under the same work item.
 9. WORK_ITEM PASS with graph incomplete -> node is deterministically completed; reviewer

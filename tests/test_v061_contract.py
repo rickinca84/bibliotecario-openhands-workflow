@@ -10,7 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-class V060ContractTests(unittest.TestCase):
+class V061ContractTests(unittest.TestCase):
     def hooks(self):
         return json.loads((ROOT / "hooks" / "hooks.json").read_text())
 
@@ -18,6 +18,12 @@ class V060ContractTests(unittest.TestCase):
         return next(
             x for x in self.hooks()["pre_tool_use"] if x.get("matcher") == "task"
         )["hooks"]
+
+    def finish_hook(self):
+        return next(
+            x for x in self.hooks()["pre_tool_use"]
+            if x.get("matcher") == "finish"
+        )["hooks"][0]["command"]
 
     def run_hook(self, command, payload, cwd):
         return subprocess.run(
@@ -29,9 +35,9 @@ class V060ContractTests(unittest.TestCase):
             env={**os.environ, "OH_PERSISTENCE_DIR": str(pathlib.Path(cwd) / ".openhands")},
         )
 
-    def test_manifest_is_v060(self):
+    def test_manifest_is_v061(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertEqual(manifest["version"], "0.6.0")
+        self.assertEqual(manifest["version"], "0.6.1")
         self.assertIn("dynamic work graph", manifest["description"])
 
     def test_no_authoritative_plan_md(self):
@@ -206,6 +212,120 @@ class V060ContractTests(unittest.TestCase):
         ):
             self.assertIn(marker + r"\s*$", command)
             self.assertNotIn(marker + r"\\s*$", command)
+
+    def test_executor_native_completed_status_hands_off_to_validation(self):
+        command = self.hooks()["post_tool_use"][0]["hooks"][0]["command"]
+
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            payload = {
+                "working_dir": str(wd),
+                "tool_input": {
+                    "subagent_type": "executor-spark",
+                },
+                "tool_response": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "The fix is complete.",
+                        }
+                    ],
+                    "is_error": False,
+                    "task_id": "task_00000002",
+                    "subagent": "executor-spark",
+                    "status": "completed",
+                    "kind": "TaskObservation",
+                },
+            }
+
+            p = self.run_hook(command, payload, wd)
+            self.assertEqual(p.returncode, 0, p.stderr)
+
+            result = json.loads((tmp / "EXECUTOR_RESULT.json").read_text())
+            self.assertEqual(result["verdict"], "READY_FOR_VALIDATION")
+            self.assertEqual(result["task_status"], "completed")
+            self.assertEqual(
+                result["completion_source"],
+                "native_task_status",
+            )
+            self.assertFalse((tmp / "TERMINAL_FAILURE.json").exists())
+
+    def test_finish_denies_success_claim_after_terminal_failure(self):
+        command = self.finish_hook()
+
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            failure = {
+                "phase": "executor",
+                "reason": "executor failed or returned invalid result",
+            }
+            (tmp / "TERMINAL_FAILURE.json").write_text(
+                json.dumps(failure),
+                encoding="utf-8",
+            )
+
+            bad = self.run_hook(
+                command,
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": "The bug has been fixed successfully."
+                    },
+                },
+                wd,
+            )
+            self.assertEqual(bad.returncode, 0, bad.stderr)
+            bad_out = json.loads(bad.stdout)
+            self.assertEqual(bad_out["decision"], "deny")
+            self.assertIn("cannot report success", bad_out["reason"])
+
+            expected = (
+                "BIBLIOTECARIO_FAILURE: executor: "
+                "executor failed or returned invalid result"
+            )
+
+            good = self.run_hook(
+                command,
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": expected
+                    },
+                },
+                wd,
+            )
+            self.assertEqual(good.returncode, 0, good.stderr)
+            good_out = json.loads(good.stdout)
+            self.assertEqual(good_out["decision"], "allow")
+
+    def test_finish_denies_unverified_success(self):
+        command = self.finish_hook()
+
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            (wd / ".agents_tmp").mkdir()
+
+            p = self.run_hook(
+                command,
+                {
+                    "working_dir": str(wd),
+                    "tool_input": {
+                        "message": "Everything passed."
+                    },
+                },
+                wd,
+            )
+
+            self.assertEqual(p.returncode, 0, p.stderr)
+            out = json.loads(p.stdout)
+            self.assertEqual(out["decision"], "deny")
+            self.assertIn("verified final success", out["reason"])
 
     def test_intake_ignores_agents_tmp_for_dirty_probe(self):
         intake = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]

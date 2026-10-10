@@ -1,8 +1,8 @@
 # bibliotecario-openhands-workflow
 
-## v0.6.0 — Dynamic Verified Work Graph
+## v0.6.1 — Dynamic Verified Work Graph
 
-v0.6.0 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
+v0.6.1 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
 dynamic graph suitable for both small fixes and larger repositories.
 
 ```text
@@ -96,7 +96,7 @@ Missing validator executables are `ENVIRONMENT_ERROR`. Scope escape is terminal.
 The workflow reuses native:
 
 - plugin/file-based subagents;
-- `task` delegation;
+- `task` delegation and native structured `TaskObservation` completion status;
 - `read_file`;
 - `write_file` including native parent-directory creation;
 - `edit`;
@@ -134,6 +134,9 @@ No Model Router or `switch_llm`.
 - completed graph nodes cannot be removed or mutated;
 - same work item retries only after deterministic local validation failure;
 - semantic reviewer never runs on deterministic failure;
+- executor text is not authoritative: normal native task completion only hands work to deterministic validation;
+- parent `finish` cannot claim success before final deterministic PASS + reviewer provenance;
+- terminal failures can be finished only with a deterministic failure report;
 - final stop requires current contract + graph + validation + review hashes to agree.
 
 ### Install source

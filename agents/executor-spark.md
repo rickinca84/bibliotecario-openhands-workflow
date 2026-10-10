@@ -45,8 +45,14 @@ contract, return:
 
 BLOCKED: REPLAN_REQUIRED
 
-Otherwise, when the bounded implementation is complete, return exactly:
+Otherwise, when the bounded implementation is complete, finish normally.
+
+Prefer to return the exact handoff marker:
 
 EXECUTION_RESULT: READY_FOR_VALIDATION
 
-Then list changed files briefly. READY_FOR_VALIDATION is never PASS.
+Then list changed files briefly.
+
+The parent also accepts the native OpenHands TaskObservation `status=completed` as the
+handoff to deterministic validation if this marker is omitted. Neither the marker nor
+native task completion is PASS. Only deterministic parent validation can establish PASS.
