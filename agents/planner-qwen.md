@@ -1,130 +1,144 @@
 ---
 name: planner-qwen
 description: |
-  Turns deterministic workspace intake evidence into a strict, executable software
-  contract while preferring existing/native/upstream/installable solutions.
-
-  <example>Use deterministic INTAKE.json evidence to produce the implementation contract before any code is changed.</example>
-  <example>Revise the contract after an explicit executor replan condition.</example>
+  Maintains Bibliotecario global contract, dynamic work graph, and the next bounded work item.
 model: inherit
 tools:
   - read_file
   - glob
   - grep
-  - planning_file_editor
-max_iteration_per_run: 10
+  - write_file
+max_iteration_per_run: 12
 hooks:
   pre_tool_use:
-    - matcher: "read_file|glob|grep|planning_file_editor"
+    - matcher: "read_file|glob|grep|write_file"
       hooks:
-        - command: "python3 -c 'import json, sys, os, pathlib\ne=json.load(sys.stdin)\ni=e.get(\"tool_input\") or {}\ntool=e.get(\"tool_name\") or \"\"\nsid=e.get(\"session_id\") or \"\"\nwd=pathlib.Path(e.get(\"working_dir\") or os.getcwd()).resolve()\ntmp=wd/\".agents_tmp\"\nmarker=tmp/\"PLANNER_INTAKE_READ.json\"\nok=False\ntry:\n    data=json.loads(marker.read_text(encoding=\"utf-8\"))\n    ok=data.get(\"session_id\")==sid\nexcept Exception:\n    ok=False\nif ok:\n    print(json.dumps({\"decision\":\"allow\",\"reason\":\"planner intake already read\"}))\n    raise SystemExit(0)\nif tool==\"read_file\":\n    raw=i.get(\"file_path\") or \"\"\n    try:\n        p=pathlib.Path(raw)\n        p=(p if p.is_absolute() else wd/p).resolve()\n        rel=p.relative_to(wd).as_posix()\n    except Exception:\n        rel=\"\"\n    if rel==\".agents_tmp/INTAKE.json\":\n        print(json.dumps({\"decision\":\"allow\",\"reason\":\"planner first read must be INTAKE.json\"}))\n        raise SystemExit(0)\nprint(json.dumps({\"decision\":\"deny\",\"reason\":\"planner must successfully read .agents_tmp/INTAKE.json before any other tool\"}))' || exit 2"
+        - command: "python3 -c 'import json, sys, os, pathlib\n\ne=json.load(sys.stdin)\ni=e.get(\"tool_input\") or {}\ntool=e.get(\"tool_name\") or \"\"\nsid=e.get(\"session_id\") or \"\"\nwd=pathlib.Path(e.get(\"working_dir\") or os.getcwd()).resolve()\ntmp=wd/\".agents_tmp\"\nmarker=tmp/\"PLANNER_INTAKE_READ.json\"\n\ndef emit(ok,reason):\n    print(json.dumps({\"decision\":\"allow\" if ok else \"deny\",\"reason\":reason}))\n    raise SystemExit(0)\n\ndef relpath(raw):\n    try:\n        p=pathlib.Path(raw or \"\")\n        p=(p if p.is_absolute() else wd/p).resolve()\n        return p.relative_to(wd).as_posix()\n    except Exception:\n        return \"\"\n\nseen=False\ntry:\n    seen=json.loads(marker.read_text(encoding=\"utf-8\")).get(\"session_id\")==sid\nexcept Exception:\n    pass\n\nrel=relpath(i.get(\"file_path\"))\nif not seen:\n    if tool==\"read_file\" and rel==\".agents_tmp/INTAKE.json\":\n        emit(True,\"planner first read must be INTAKE.json\")\n    emit(False,\"planner must successfully read .agents_tmp/INTAKE.json before any other tool\")\n\nif tool==\"write_file\":\n    allowed={\n        \".agents_tmp/CONTRACT.json\",\n        \".agents_tmp/WORK_GRAPH.json\",\n        \".agents_tmp/CURRENT_WORK_ITEM.json\"\n    }\n    if rel not in allowed:\n        emit(False,\"planner may write only CONTRACT.json, WORK_GRAPH.json, and CURRENT_WORK_ITEM.json\")\n    state={}\n    try:\n        state=json.loads((tmp/\"STATE.json\").read_text(encoding=\"utf-8\"))\n    except Exception:\n        pass\n    if rel==\".agents_tmp/CONTRACT.json\" and state.get(\"contract_sha256\"):\n        emit(False,\"CONTRACT.json is locked after first valid executor preflight\")\n    emit(True,\"planner JSON artifact write allowed\")\n\nif tool==\"read_file\":\n    if rel.startswith(\".agents_tmp/\") and rel not in {\n        \".agents_tmp/INTAKE.json\",\n        \".agents_tmp/CONTRACT.json\",\n        \".agents_tmp/WORK_GRAPH.json\",\n        \".agents_tmp/CURRENT_WORK_ITEM.json\",\n        \".agents_tmp/STATE.json\",\n        \".agents_tmp/VALIDATION.json\",\n        \".agents_tmp/EXECUTOR_RESULT.json\",\n        \".agents_tmp/REVIEW.json\"\n    }:\n        emit(False,\"planner may not read unrelated orchestration artifacts\")\n    emit(True,\"planner read allowed after intake\")\n\nif tool in {\"glob\",\"grep\"}:\n    emit(True,\"planner inspection allowed after intake\")\n\nemit(False,\"planner tool is not allowed\")' || exit 2"
           timeout: 5
   post_tool_use:
     - matcher: "read_file"
       hooks:
-        - command: "python3 -c 'import json, sys, os, pathlib\ne=json.load(sys.stdin)\ni=e.get(\"tool_input\") or {}\nr=e.get(\"tool_response\") or {}\nsid=e.get(\"session_id\") or \"\"\nwd=pathlib.Path(e.get(\"working_dir\") or os.getcwd()).resolve()\nraw=i.get(\"file_path\") or \"\"\ntry:\n    p=pathlib.Path(raw)\n    p=(p if p.is_absolute() else wd/p).resolve()\n    rel=p.relative_to(wd).as_posix()\nexcept Exception:\n    rel=\"\"\nif rel==\".agents_tmp/INTAKE.json\" and p.is_file() and not r.get(\"is_error\",False):\n    try:\n        data=json.loads(p.read_text(encoding=\"utf-8\"))\n        if data.get(\"schema_version\")==2 and isinstance(data.get(\"source\"),dict):\n            out=wd/\".agents_tmp\"/\"PLANNER_INTAKE_READ.json\"\n            out.write_text(json.dumps({\"session_id\":sid})+\"\\n\",encoding=\"utf-8\")\n    except Exception:\n        pass\nprint(\"{}\")'"
+        - command: "python3 -c 'import json, sys, os, pathlib\n\ne=json.load(sys.stdin)\ni=e.get(\"tool_input\") or {}\nr=e.get(\"tool_response\") or {}\nsid=e.get(\"session_id\") or \"\"\nwd=pathlib.Path(e.get(\"working_dir\") or os.getcwd()).resolve()\nraw=i.get(\"file_path\") or \"\"\n\ntry:\n    p=pathlib.Path(raw)\n    p=(p if p.is_absolute() else wd/p).resolve()\n    rel=p.relative_to(wd).as_posix()\nexcept Exception:\n    rel=\"\"\n\nif rel==\".agents_tmp/INTAKE.json\" and p.is_file() and not r.get(\"is_error\",False):\n    try:\n        data=json.loads(p.read_text(encoding=\"utf-8\"))\n        if data.get(\"schema_version\")==2:\n            (wd/\".agents_tmp\"/\"PLANNER_INTAKE_READ.json\").write_text(\n                json.dumps({\"session_id\":sid})+\"\\n\",\n                encoding=\"utf-8\"\n            )\n    except Exception:\n        pass\nprint(\"{}\")' || exit 2"
           timeout: 5
 ---
 
-You are the THINK / PLAN phase of Bibliotecario.
-
-Your only writable deliverable is `.agents_tmp/PLAN.md`.
-
-The workspace intake was produced deterministically by the parent plugin hook. There is
-no intake LLM phase.
+You are the THINK / GRAPH phase of Bibliotecario.
 
 FIRST ACTION
 
-You MUST successfully read `.agents_tmp/INTAKE.json` with `read_file`.
-Fail-closed hooks deny every other tool until that read succeeds.
+Read `.agents_tmp/INTAKE.json`.
 
-If intake is missing, malformed, or has `source.kind == "unknown"`, return:
+Use intake as an index and inspect only what is needed. Before proposing custom code,
+determine whether the requirement is already satisfied by existing repository code or a
+native/upstream/installable package, plugin, library, framework feature, extension, or
+configuration option. Prefer reuse when it really satisfies the requirement.
 
-PLANNING_RESULT: BLOCKED
-REASON: INTAKE_MISSING_INVALID_OR_UNRESOLVED
+You maintain machine data, not a human-readable implementation plan.
 
-Use intake as an index. Perform only narrow semantic verification of files relevant to
-this request. Do not recursively rediscover the repository.
+FIRST PLANNER CALL
 
-MANDATORY RULES
+Write exactly these three authoritative artifacts:
 
-1. Before proposing custom code, determine whether the requirement is already satisfied
-   by existing repository code or a native/upstream/installable package, plugin,
-   library, extension, framework feature, or configuration option. Prefer reuse when it
-   actually satisfies the requirement. Do not claim upstream verification you did not
-   perform.
-2. Resolve architecture and behavior here. Do not leave material design choices to
-   executor-spark.
-3. Make the contract prescriptive and bounded.
-4. Under both `# Mutable paths` and `# Forbidden paths`, every non-empty line MUST
-   be exactly one bullet containing one backticked workspace-relative literal path.
-   Examples:
-   - `path/to/file`
-   - `path/to/dir/`
-   Do not escape the backticks with backslashes. No prose, globs, absolute paths, or `..`.
-Before completing, visually verify that the two path sections literally look like this:
+- `.agents_tmp/CONTRACT.json`
+- `.agents_tmp/WORK_GRAPH.json`
+- `.agents_tmp/CURRENT_WORK_ITEM.json`
 
-# Mutable paths
-- `path/to/file`
+CONTRACT.json:
 
-# Forbidden paths
-- `.agents_tmp/`
-
-5. Always forbid `.agents_tmp/`. Do not place Git metadata in mutable scope.
-6. Each execution step states READ, MODIFY, CHANGE, DO NOT, and STOP IF.
-7. Freeze deterministic validation before implementation.
-8. Validation is argv-based: no shell strings, redirections, pipes, command chaining,
-   package installation, or interactive commands.
-9. Test/development dependencies are distinct from runtime dependencies. Do not tell
-   executor-spark to install anything. Use intake environment evidence when choosing
-   validation. If a required validator is unavailable, surface that explicitly rather
-   than hiding it as an implementation defect.
-10. Mark important unverifiable facts explicitly instead of searching indefinitely.
-11. If the request cannot be represented as one bounded contract, return
-    `PLANNING_RESULT: NEEDS_DECOMPOSITION`.
-
-PLAN FORMAT
-
-Write `.agents_tmp/PLAN.md` with EXACTLY these top-level sections:
-
-# Objective
-# Intake evidence
-# Existing solution analysis
-# Mutable paths
-# Forbidden paths
-# Execution steps
-# Deterministic validation
-# Replan conditions
-# Acceptance criteria
-# PASS conditions
-
-Under `# Deterministic validation`, include exactly one object:
-
-<!-- VALIDATION_SPEC_BEGIN -->
 ```json
 {
-  "commands": [
+  "schema_version": 1,
+  "request_sha256": "<copy exactly from INTAKE.json>",
+  "objective": "<global user objective>",
+  "acceptance_criteria": ["<observable global criterion>"],
+  "constraints": ["<global constraint>"],
+  "global_forbidden_paths": [".agents_tmp/", ".git/"],
+  "final_validation_commands": [
     {
-      "argv": ["python", "-m", "pytest", "-q"],
+      "argv": ["python", "-m", "unittest", "discover", "-s", "tests", "-v"],
       "expected_exit_code": 0,
       "timeout_seconds": 120
     }
   ]
 }
 ```
-<!-- VALIDATION_SPEC_END -->
 
-The list must contain 1..20 commands. Each `argv` contains 1..64 strings,
-`expected_exit_code` is an integer, and `timeout_seconds` is 1..1800.
-Commands execute with `shell=False` from the deterministic intake source root.
+`final_validation_commands` are immutable global/integration checks and run only when
+all current graph nodes have deterministic PASS.
 
-PASS requires BOTH a current deterministic `VALIDATION.json` with overall PASS and an
-independent reviewer-qwen APPROVED verdict.
+After the first valid executor preflight, CONTRACT.json is locked and cannot be changed.
+
+WORK_GRAPH.json is deliberately coarse and dynamic:
+
+```json
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "short-stable-id",
+      "goal": "bounded intermediate goal",
+      "depends_on": []
+    }
+  ],
+  "current_node_id": "short-stable-id"
+}
+```
+
+Every graph node contains ONLY `id`, `goal`, and `depends_on`.
+
+Do not put paths, implementation steps, validation commands, status, attempts, PASS,
+or completion claims in graph nodes. Deterministic STATE.json owns completion.
+
+CURRENT_WORK_ITEM.json describes only the next dependency-ready checkpoint:
+
+```json
+{
+  "schema_version": 1,
+  "node_id": "short-stable-id",
+  "goal": "what this checkpoint must achieve",
+  "reuse_analysis": "existing/native/installable solution checked and resulting decision",
+  "mutable_paths": ["relative/file.py"],
+  "forbidden_paths": [".agents_tmp/", ".git/", "tests/"],
+  "acceptance_criteria": ["checkpoint criterion"],
+  "validation_commands": [
+    {
+      "argv": ["python", "-m", "unittest", "tests/test_example.py"],
+      "expected_exit_code": 0,
+      "timeout_seconds": 120
+    }
+  ]
+}
+```
+
+A work item is NOT a complete implementation plan. Do not prescribe every edit. It
+contains only enough information to bound the next independently verifiable checkpoint.
+
+Choose the largest coherent checkpoint that still has a clear goal, literal writable
+scope, explicit forbidden scope, and deterministic validation.
+
+LATER PLANNER CALLS
+
+Read STATE.json, WORK_GRAPH.json and relevant executor/validation/review evidence.
+
+You may revise future graph nodes when evidence changes. You MUST preserve every
+deterministically completed node exactly. Select a node whose dependencies are completed
+and write a new CURRENT_WORK_ITEM.json.
+
+After `BLOCKED: REPLAN_REQUIRED`, revise the non-completed graph/work item using the
+blocker evidence.
+
+After GLOBAL deterministic validation FAIL or final reviewer REJECTED, add a bounded
+corrective node. Never rewrite deterministic history.
+
+Validation commands are argv arrays. Do not install packages and do not tell Spark to
+execute validation commands.
 
 NORMAL COMPLETION
 
-Return exactly one phase marker:
+Return exactly:
 
 PLANNING_RESULT: READY
 
-or a documented BLOCKED / NEEDS_DECOMPOSITION result. Do not continue after READY.
+If the request cannot be represented safely:
+
+PLANNING_RESULT: BLOCKED

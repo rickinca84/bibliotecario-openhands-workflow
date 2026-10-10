@@ -1,166 +1,143 @@
 # bibliotecario-openhands-workflow
 
-Version 0.5.2 is the hardened follow-up to the first real Agent Canvas E2E runs.
+## v0.6.0 — Dynamic Verified Work Graph
+
+v0.6.0 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
+dynamic graph suitable for both small fixes and larger repositories.
 
 ```text
 USER REQUEST
     |
-    v
-deterministic UserPromptSubmit intake
+deterministic INTAKE.json
     |
-    v
-.agents_tmp/INTAKE.json
+planner-qwen
+    +--> CONTRACT.json
+    +--> WORK_GRAPH.json
+    +--> CURRENT_WORK_ITEM.json
     |
-    v
-planner-qwen (Qwen)
+deterministic preflight BEFORE Spark
     |
-    v
-.agents_tmp/PLAN.md
+executor-spark
     |
-    v
-EXECUTION_BASELINE snapshot
+scope validation
     |
-    v
-executor-spark (Spark X2.5 4B)
-    |  native: read_file / write_file / edit
-    v
-scope delta check BEFORE validation commands
+work-item argv validation
     |
-    v
-deterministic argv validation (shell=False)
+    +-- FAIL ----------------------> retry same work item
     |
-    +-- FAIL --> bounded executor correction
+deterministic completed_nodes
     |
-    v
-reviewer-qwen (Qwen; project-read-only)
+    +-- graph incomplete ----------> planner selects/refines next node
     |
-    v
-mechanically recorded REVIEW.json
-    |
-    v
-parent Stop gate
+    +-- graph complete
+            |
+      immutable global argv validation
+            |
+            +-- FAIL -------------> planner adds corrective node
+            |
+            v
+      reviewer-qwen
+            |
+       APPROVED / REJECTED
+            |
+       deterministic Stop gate
 ```
 
-## What v0.5.2 fixes
+### Authority split
 
-The v0.4 and v0.5 E2E runs exposed concrete failure modes:
+- `INTAKE.json`: deterministic repository and environment evidence.
+- `CONTRACT.json`: locked global objective, acceptance criteria, constraints, forbidden
+  paths, and final integration validation.
+- `WORK_GRAPH.json`: coarse dynamic DAG. Nodes contain only `id`, `goal`, `depends_on`.
+- `CURRENT_WORK_ITEM.json`: just-in-time bounded checkpoint for the current node.
+- `STATE.json`: authoritative budgets and completed-node fingerprints.
+- `VALIDATION.json`: deterministic scope/test evidence.
+- `REVIEW.json`: final semantic verdict with provenance.
 
-- LLM intake was expensive and could modify project files;
-- fresh tasks could arrive as `resume=""`;
-- the standard `file_editor` cannot create missing parent directories;
-- validator-created caches could be misattributed to the executor;
-- deterministic FAIL could still be followed by semantic APPROVED;
-- policy-hook interpreter errors could exit 1, which OpenHands treats as non-blocking;
-- shell-string validation unnecessarily widened the deterministic execution surface.
+There is no authoritative `PLAN.md`.
 
-v0.5.2 addresses those problems without adding another custom filesystem layer.
+### Why the graph is deliberately incomplete
 
-## Native OpenHands functionality reused
+Large repositories cannot be truthfully planned edit-by-edit before implementation.
+The planner maps intermediate goals and dependencies, then creates a concrete work item
+only for the next dependency-ready checkpoint.
 
-The implementation deliberately reuses capabilities confirmed in the target Agent
-Canvas / Agent Server installation:
+Future nodes may be changed as repository evidence is discovered. Completed nodes cannot:
+their `id`, `goal`, and `depends_on` are fingerprinted in deterministic STATE.
 
-- native plugin and file-based subagent loading;
-- native `task` / `task_tool_set`;
-- native `read_file`;
-- native `write_file`, which creates parent directories when required;
-- native `edit` for exact bounded replacements;
-- native `glob`, `grep`, and `planning_file_editor`;
-- native UserPromptSubmit / PreToolUse / PostToolUse / Stop hooks;
-- native Git-backed workspace behavior.
+### Work item versus graph node
 
-There is no custom mkdir/scaffolding implementation in the executor path.
+A graph node is a coarse project goal. A work item is the executable contract for one
+checkpoint and contains:
 
-## Parent profile requirement
+- local goal;
+- existing/native/installable reuse analysis;
+- mutable paths;
+- forbidden paths;
+- acceptance criteria;
+- frozen argv validation.
 
-OpenHands scopes delegated agents to the explicit parent tool list when the parent
-profile stores `tools != null`. Therefore the parent profile must contain every tool
-used by its delegated agents, even when parent hooks deny direct use.
+It intentionally does not prescribe every edit. Spark chooses the smallest sound
+implementation inside those bounds.
 
-For `qwen-plan-spark-execute`, keep the existing tools and add:
+### Multi-level deterministic validation
 
-```text
-write_file
-edit
-```
+Every work item has local validation. After every current graph node is completed,
+`CONTRACT.final_validation_commands` run as global/integration validation before the
+semantic reviewer.
 
-Do not enable Model Router or `switch_llm`.
+Validation uses argv arrays, `shell=False`, bounded timeouts, deterministic cwd, and
+scope comparison against a per-work-item baseline.
 
-The parent is still orchestration-only. Plugin PreToolUse hooks deny direct repository
-tool usage by the parent.
+Missing validator executables are `ENVIRONMENT_ERROR`. Scope escape is terminal.
 
-Before saving a profile change, use the native
-`POST /api/agent-profiles/{name}/materialize` preview endpoint.
+### Native OpenHands capabilities reused
 
-## Deterministic intake
+The workflow reuses native:
 
-There is no `intake-spark` phase. UserPromptSubmit performs bounded structural intake
-and writes schema-v2 `.agents_tmp/INTAKE.json` without an LLM.
+- plugin/file-based subagents;
+- `task` delegation;
+- `read_file`;
+- `write_file` including native parent-directory creation;
+- `edit`;
+- `glob`;
+- `grep`;
+- UserPromptSubmit / PreToolUse / PostToolUse / Stop hooks;
+- saved model profiles;
+- Git-backed workspace behavior.
 
-Policy hooks are fail-closed: unexpected hook runtime failures are converted to exit 2,
-which is the blocking hook exit code required by OpenHands.
+No OpenHands/Agent Canvas source patch is required.
 
-## Planner contract
+`planning_file_editor` is no longer used because the authoritative planning artifacts
+are structured JSON rather than a human Markdown plan.
 
-The planner must first read INTAKE.json.
+### Models
 
-`# Mutable paths` and `# Forbidden paths` accept only backticked literal
-workspace-relative path bullets. No prose, globs, absolute paths, or `..` are valid.
-`.agents_tmp/` must be forbidden.
+- planner/reviewer: parent Qwen model (`inherit`);
+- executor: saved local profile `spark2.5-4b`.
 
-Validation is represented as argv arrays, not shell strings:
+Spark receives only `read_file`, `write_file`, and `edit`; it has no terminal.
 
-```json
-{
-  "commands": [
-    {
-      "argv": ["python", "-m", "pytest", "-q"],
-      "expected_exit_code": 0,
-      "timeout_seconds": 120
-    }
-  ]
-}
-```
+### Parent profile
 
-## Spark executor
+The parent remains orchestration-only. Because explicit OpenHands parent tool lists
+scope delegated agents, the saved parent profile must expose the union of native tools
+needed by delegated agents, while plugin hooks deny direct parent use.
 
-The executor has only:
+No Model Router or `switch_llm`.
 
-```text
-read_file
-write_file
-edit
-```
+### Fail-closed guarantees
 
-It has no terminal. Native hooks require PLAN.md to be read first and mechanically
-restrict every write to the plan's literal mutable scope.
+- malformed JSON/graph/work item is denied before Spark starts;
+- the locked global contract cannot change after first valid executor preflight;
+- only deterministic validation writes completed-node state;
+- completed graph nodes cannot be removed or mutated;
+- same work item retries only after deterministic local validation failure;
+- semantic reviewer never runs on deterministic failure;
+- final stop requires current contract + graph + validation + review hashes to agree.
 
-`write_file` supplies the missing-parent-directory behavior natively, so no
-Bibliotecario-specific directory creation code is needed.
-
-## Validation
-
-The execution baseline is captured immediately before the first executor call.
-
-Scope is checked before any validation command runs. Validation commands execute as
-argv with `shell=False` from the deterministic intake source root.
-
-A missing validation executable is recorded as `ENVIRONMENT_ERROR`, not silently
-treated as an implementation defect. Deterministic FAIL denies reviewer startup.
-
-## Review and final gate
-
-reviewer-qwen is project-read-only and must successfully read INTAKE.json, PLAN.md, and
-a PASS VALIDATION.json before semantic review.
-
-The parent Stop gate permits successful completion only when the current PLAN hash,
-deterministic PASS, and reviewer APPROVED provenance all agree.
-
-## Install
+### Install source
 
 ```text
 github:rickinca84/bibliotecario-openhands-workflow
 ```
-
-For Docker conversation runtime, explicitly attach the plugin source when creating the
-conversation until Agent Canvas exposes the custom installed plugin in its launcher.
