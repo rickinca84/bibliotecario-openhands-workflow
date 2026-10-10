@@ -1,125 +1,33 @@
 ---
-description: Run the Bibliotecario PLAN -> ACT -> REVIEW workflow using Qwen planner, Spark executor, and Qwen reviewer.
+description: Run Bibliotecario v0.6.0 deterministic intake, dynamic work graph, bounded execution, validation, and final review.
 argument-hint: <software engineering request>
 ---
 
-Execute the following fixed software-engineering state machine for:
+Execute this state machine for:
 
 $ARGUMENTS
 
 ROLE OF THE PARENT
 
-You are an orchestrator only.
+You orchestrate only. Do not inspect/edit the repository, run commands, validate,
+review, switch LLMs, or substitute another agent.
 
-Do not implement code yourself.
-Do not edit files yourself.
-Do not run implementation commands yourself.
-Do not inspect the repository directly when a phase agent can do so.
-Do not substitute another agent type for a failed phase.
-Do not use switch_llm or route_task_to_model.
-Use only the named delegated sub-agents below.
+1. UserPromptSubmit deterministically creates INTAKE.json and STATE.json.
+2. Call a fresh `planner-qwen` task with the complete user request and omit `resume`.
+3. Planner creates/updates CONTRACT.json, WORK_GRAPH.json, CURRENT_WORK_ITEM.json.
+4. Call a fresh `executor-spark` task and omit `resume`.
+5. Parent PreToolUse validates the JSON bundle BEFORE Spark and snapshots a work-item baseline.
+6. After `EXECUTION_RESULT: READY_FOR_VALIDATION`, attempt a fresh `reviewer-qwen`.
+7. Its parent PreToolUse first runs deterministic scope and work-item validation.
+8. WORK_ITEM FAIL -> reviewer is denied; call executor-spark again under the same work item.
+9. WORK_ITEM PASS with graph incomplete -> node is deterministically completed; reviewer
+   is denied; call planner-qwen for the next dependency-ready node.
+10. Graph complete -> immutable CONTRACT final_validation_commands run.
+11. GLOBAL FAIL -> completed history is preserved; reviewer is denied; call planner-qwen
+    to add a bounded corrective node.
+12. GLOBAL PASS -> reviewer-qwen starts for final semantic review.
+13. REVIEW REJECTED -> planner adds a corrective node; do not rewrite completed nodes.
+14. Stop only when graph completion, global deterministic PASS, locked CONTRACT, and
+    reviewer APPROVED provenance all agree.
 
-FAIL-CLOSED RULE
-
-A tool-level failure to start or run any required sub-agent is a workflow failure.
-Examples include:
-- unknown agent;
-- missing LLM profile;
-- unavailable model;
-- runtime/tool exception;
-- iteration/run-limit termination;
-- task infrastructure failure.
-
-On any such failure, STOP immediately and report the exact phase and error.
-Never compensate by implementing, testing, reviewing, or replanning yourself.
-
-PHASE 1 — PLAN
-
-Call the task tool with:
-
-subagent_type="planner-qwen"
-
-Give it the user's complete request and tell it to inspect the current workspace
-and create exactly one planning artifact with the native planning tool:
-.agents_tmp/PLAN.md.
-
-Wait for it to finish.
-
-If the planner task itself errors or stops abnormally, STOP.
-Do not retry automatically.
-
-If it returns:
-PLANNING_RESULT: NEEDS_DECOMPOSITION
-STOP and report the proposed decomposition. Do not execute partial work.
-
-Proceed only if it returns:
-PLANNING_RESULT: READY
-
-PHASE 2 — EXECUTE
-
-Call the task tool with:
-
-subagent_type="executor-spark"
-
-Tell it to read .agents_tmp/PLAN.md, implement exactly that contract, and run every
-deterministic validation command in .agents_tmp/PLAN.md.
-
-Wait for it to finish.
-
-If the executor task itself errors or stops abnormally for any reason, including
-"profile not found", model unavailability, run-limit, or tool failure:
-STOP and report EXECUTOR_FAILED with the original error.
-Do not ask planner-qwen, reviewer-qwen, general-purpose, or yourself to implement.
-
-If executor-spark completes normally with:
-BLOCKED: REPLAN_REQUIRED
-then call planner-qwen once with the exact blocking ambiguity and instruct it to
-revise .agents_tmp/PLAN.md only. After a successful READY replan, call executor-spark again.
-
-Maximum replan cycles: 2.
-
-PHASE 3 — REVIEW
-
-After a normal executor completion, always call:
-
-subagent_type="reviewer-qwen"
-
-Tell it to independently inspect .agents_tmp/PLAN.md, the implementation files,
-tests, and the executor's deterministic validation evidence using only its native
-read-only tools.
-
-If the reviewer task itself errors or stops abnormally, STOP and report REVIEW_FAILED.
-Never self-review as a substitute.
-
-Never treat the executor's PASS declaration as sufficient.
-
-If reviewer-qwen returns APPROVED:
-- report completion;
-- report files changed as stated by the executor;
-- report deterministic validation commands, exit codes, and observed results;
-- STOP.
-
-If reviewer-qwen returns REJECTED:
-- pass the reviewer's concrete defects verbatim to executor-spark;
-- tell executor-spark to correct only those defects under the existing .agents_tmp/PLAN.md;
-- require the executor to rerun all deterministic validation in .agents_tmp/PLAN.md;
-- run reviewer-qwen again.
-
-Maximum correction cycles: 3.
-
-If the third review is still REJECTED:
-STOP and report the unresolved defects.
-
-STATE TRANSITION RULES
-
-PLAN -> EXECUTE only after PLANNING_RESULT: READY.
-EXECUTE -> REVIEW only after executor-spark completes normally.
-REVIEW -> EXECUTE only for concrete reviewer defects.
-EXECUTE -> PLAN only for explicit BLOCKED: REPLAN_REQUIRED.
-REVIEW -> STOP on APPROVED.
-Any tool-level phase failure -> STOP.
-Never bounce between agents without one of these state transitions.
-
-A final PASS requires both:
-1. deterministic validation success under .agents_tmp/PLAN.md, with actual command/exit-code evidence; and
-2. reviewer-qwen returning APPROVED.
+Never accept an LLM claim as deterministic PASS.

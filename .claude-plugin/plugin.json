@@ -1,6 +1,6 @@
 {
   "name": "bibliotecario-openhands-workflow",
-  "version": "0.3.0",
-  "description": "Fail-closed OpenHands PLAN -> ACT -> REVIEW workflow with mandatory native subagent delegation.",
+  "version": "0.6.0",
+  "description": "Fail-closed OpenHands workflow with deterministic intake, global JSON contract, dynamic work graph, bounded Spark work items, deterministic validation, and final Qwen review.",
   "entry_command": "run"
 }

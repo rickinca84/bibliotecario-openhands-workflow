@@ -1,156 +1,143 @@
 # bibliotecario-openhands-workflow
 
-Version 0.3.0 capability-contract update.
+## v0.6.0 — Dynamic Verified Work Graph
 
-Reusable OpenHands plugin implementing a native, fail-closed sequential workflow:
+v0.6.0 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
+dynamic graph suitable for both small fixes and larger repositories.
 
 ```text
 USER REQUEST
     |
-    v
-planner-qwen        (inherits parent Qwen; native planning tools)
+deterministic INTAKE.json
     |
-    v
-.agents_tmp/PLAN.md + READY
+planner-qwen
+    +--> CONTRACT.json
+    +--> WORK_GRAPH.json
+    +--> CURRENT_WORK_ITEM.json
     |
-    v
-executor-spark      (spark2.5-4b; terminal + file_editor)
+deterministic preflight BEFORE Spark
     |
-    v
-deterministic validation
+executor-spark
     |
-    v
-reviewer-qwen       (inherits parent Qwen; native read-only tools)
+scope validation
     |
-    +---- APPROVED ----> STOP
+work-item argv validation
     |
-    +---- REJECTED ----> executor-spark fix -> reviewer-qwen
+    +-- FAIL ----------------------> retry same work item
+    |
+deterministic completed_nodes
+    |
+    +-- graph incomplete ----------> planner selects/refines next node
+    |
+    +-- graph complete
+            |
+      immutable global argv validation
+            |
+            +-- FAIL -------------> planner adds corrective node
+            |
+            v
+      reviewer-qwen
+            |
+       APPROVED / REJECTED
+            |
+       deterministic Stop gate
 ```
 
-The workflow is exposed as:
+### Authority split
 
-```text
-/bibliotecario-openhands-workflow:run <request>
-```
+- `INTAKE.json`: deterministic repository and environment evidence.
+- `CONTRACT.json`: locked global objective, acceptance criteria, constraints, forbidden
+  paths, and final integration validation.
+- `WORK_GRAPH.json`: coarse dynamic DAG. Nodes contain only `id`, `goal`, `depends_on`.
+- `CURRENT_WORK_ITEM.json`: just-in-time bounded checkpoint for the current node.
+- `STATE.json`: authoritative budgets and completed-node fingerprints.
+- `VALIDATION.json`: deterministic scope/test evidence.
+- `REVIEW.json`: final semantic verdict with provenance.
 
-While the plugin is attached, a native UserPromptSubmit hook injects the orchestration rule into each user turn. This makes ordinary software-engineering requests follow the same PLAN -> ACT -> REVIEW discipline even when the slash command is omitted.
+There is no authoritative `PLAN.md`.
 
-## OpenHands compatibility
+### Why the graph is deliberately incomplete
 
-Designed for the native plugin/sub-agent/hook mechanisms in OpenHands
-software-agent-sdk 1.53.x.
+Large repositories cannot be truthfully planned edit-by-edit before implementation.
+The planner maps intermediate goals and dependencies, then creates a concrete work item
+only for the next dependency-ready checkpoint.
 
-No OpenHands source patch is required.
+Future nodes may be changed as repository evidence is discovered. Completed nodes cannot:
+their `id`, `goal`, and `depends_on` are fingerprinted in deterministic STATE.
 
-## Install source
+### Work item versus graph node
+
+A graph node is a coarse project goal. A work item is the executable contract for one
+checkpoint and contains:
+
+- local goal;
+- existing/native/installable reuse analysis;
+- mutable paths;
+- forbidden paths;
+- acceptance criteria;
+- frozen argv validation.
+
+It intentionally does not prescribe every edit. Spark chooses the smallest sound
+implementation inside those bounds.
+
+### Multi-level deterministic validation
+
+Every work item has local validation. After every current graph node is completed,
+`CONTRACT.final_validation_commands` run as global/integration validation before the
+semantic reviewer.
+
+Validation uses argv arrays, `shell=False`, bounded timeouts, deterministic cwd, and
+scope comparison against a per-work-item baseline.
+
+Missing validator executables are `ENVIRONMENT_ERROR`. Scope escape is terminal.
+
+### Native OpenHands capabilities reused
+
+The workflow reuses native:
+
+- plugin/file-based subagents;
+- `task` delegation;
+- `read_file`;
+- `write_file` including native parent-directory creation;
+- `edit`;
+- `glob`;
+- `grep`;
+- UserPromptSubmit / PreToolUse / PostToolUse / Stop hooks;
+- saved model profiles;
+- Git-backed workspace behavior.
+
+No OpenHands/Agent Canvas source patch is required.
+
+`planning_file_editor` is no longer used because the authoritative planning artifacts
+are structured JSON rather than a human Markdown plan.
+
+### Models
+
+- planner/reviewer: parent Qwen model (`inherit`);
+- executor: saved local profile `spark2.5-4b`.
+
+Spark receives only `read_file`, `write_file`, and `edit`; it has no terminal.
+
+### Parent profile
+
+The parent remains orchestration-only. Because explicit OpenHands parent tool lists
+scope delegated agents, the saved parent profile must expose the union of native tools
+needed by delegated agents, while plugin hooks deny direct parent use.
+
+No Model Router or `switch_llm`.
+
+### Fail-closed guarantees
+
+- malformed JSON/graph/work item is denied before Spark starts;
+- the locked global contract cannot change after first valid executor preflight;
+- only deterministic validation writes completed-node state;
+- completed graph nodes cannot be removed or mutated;
+- same work item retries only after deterministic local validation failure;
+- semantic reviewer never runs on deterministic failure;
+- final stop requires current contract + graph + validation + review hashes to agree.
+
+### Install source
 
 ```text
 github:rickinca84/bibliotecario-openhands-workflow
 ```
-
-## Parent Agent Profile: important OpenHands 1.53 scope behavior
-
-OpenHands 1.53 automatically scopes delegated sub-agent tools to the tools selected
-on an Agent Profile when that profile uses an explicit custom tool list.
-
-Therefore the parent profile must FORMALLY include the union of tools required by
-its delegates:
-
-```text
-task_tool_set
-task_tracker
-terminal
-file_editor
-glob
-grep
-planning_file_editor
-read_file
-```
-
-Do not enable `switch_llm` or Model Router for this workflow.
-
-Although the delegate tool union must be present on the parent profile for native
-sub-agent scoping, plugin-level PreToolUse hooks deterministically DENY the parent
-from invoking repository tools directly. `planning_file_editor` and `read_file`
-are native internal OpenHands tools; they may not appear in the normal Canvas
-tool picker but can be named in the stored Agent Profile. The same
-hook layer also blocks delegation to agent types outside `planner-qwen`,
-`executor-spark`, and `reviewer-qwen`. These plugin hooks apply to the parent
-conversation. Planner and reviewer rely on narrower native OpenHands tools rather
-than custom file-write hooks; executor uses the standard native execution tools.
-
-The effective capability split is therefore:
-
-```text
-PARENT
-  effective: task delegation + task tracking only
-
-PLANNER
-  glob + grep + planning_file_editor
-  native tool writes only .agents_tmp/PLAN.md
-
-EXECUTOR
-  terminal + file_editor
-  reads .agents_tmp/PLAN.md and implements the contract
-
-REVIEWER
-  glob + grep + read_file
-  read-only by construction
-```
-
-## Automatic Spark profile bootstrap
-
-The isolated Docker conversation runtime has its own LLM profile store. A profile
-saved in the outer Canvas server is not automatically available there.
-
-On SessionStart this plugin uses the native OpenHands `LLMProfileStore` API to
-create the local runtime profile `spark2.5-4b` if it is absent:
-
-```text
-model:    openai/spark2.5-4b
-base_url: http://host.docker.internal:30000/v1
-api_key:  local
-```
-
-The key is a non-secret placeholder for the local OpenAI-compatible endpoint.
-An existing runtime profile with the same name is left untouched.
-
-Before an `executor-spark` task starts, a native PreToolUse hook verifies that
-the profile exists. If it does not, the executor delegation is denied and the
-workflow fails closed instead of falling back to Qwen.
-
-## Planner bounds
-
-The planner:
-- uses the native OpenHands planning toolset: `glob`, `grep`, and
-  `planning_file_editor`;
-- has no terminal;
-- may read the repository;
-- may write only the native plan file `.agents_tmp/PLAN.md`;
-- has a ten-iteration run budget;
-- must return either `PLANNING_RESULT: READY` or
-  `PLANNING_RESULT: NEEDS_DECOMPOSITION`;
-- must not create auxiliary planning documents.
-
-## Executor bounds
-
-The Spark executor is the only phase allowed to modify implementation files and
-run deterministic validation. It has an 18-iteration run budget and may not alter
-`.agents_tmp/PLAN.md` or weaken the acceptance oracle.
-
-## Reviewer bounds
-
-The reviewer is read-only by construction. It uses native `glob`, `grep`, and
-`read_file`, independently inspecting `.agents_tmp/PLAN.md`, implementation,
-tests, and executor validation evidence. It has no write-capable file tool and no
-terminal, so it cannot modify files or claim to rerun commands.
-
-## Fail-closed behavior
-
-A final PASS requires:
-1. deterministic validation success under .agents_tmp/PLAN.md; and
-2. reviewer-qwen returning APPROVED.
-
-Missing agent/model/profile, runtime errors, run-limit termination, and task
-infrastructure failures stop the workflow. The parent is never allowed to
-substitute itself for a failed phase.
