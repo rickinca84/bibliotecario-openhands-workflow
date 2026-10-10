@@ -95,6 +95,33 @@ class V052ContractTests(unittest.TestCase):
             any(item.get("matcher") == "task" for item in hooks["post_tool_use"])
         )
 
+    def test_phase_marker_regexes_match_real_subagent_output(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        command = hooks["post_tool_use"][0]["hooks"][0]["command"]
+        markers = [
+            "PLANNING_RESULT: READY",
+            "PLANNING_RESULT: NEEDS_DECOMPOSITION",
+            "PLANNING_RESULT: BLOCKED",
+            "EXECUTION_RESULT: READY_FOR_VALIDATION",
+            "BLOCKED: REPLAN_REQUIRED",
+            "EXECUTION_RESULT: FAIL",
+        ]
+        for marker in markers:
+            self.assertIn(marker + r"\s*$", command)
+            self.assertNotIn(marker + r"\\s*$", command)
+
+    def test_planner_path_examples_use_literal_unescaped_backticks(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("- `path/to/file`", text)
+        self.assertIn("- `path/to/dir/`", text)
+        self.assertIn("Do not escape the backticks with backslashes", text)
+        self.assertNotIn(r"- \`path/to/file\`", text)
+
+    def test_intake_dirty_probe_ignores_plugin_control_artifacts(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        intake = hooks["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn(':(exclude).agents_tmp/**', intake)
+
     def test_inline_python_hooks_compile(self):
         paths = [
             ROOT / "hooks" / "hooks.json",
