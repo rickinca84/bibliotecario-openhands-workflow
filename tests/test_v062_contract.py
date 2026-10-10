@@ -10,7 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-class V062ContractTests(unittest.TestCase):
+class V063ContractTests(unittest.TestCase):
     def hooks(self):
         return json.loads((ROOT / "hooks" / "hooks.json").read_text())
 
@@ -34,19 +34,43 @@ class V062ContractTests(unittest.TestCase):
     def stop_hook(self):
         return self.hooks()["stop"][0]["hooks"][0]["command"]
 
-    def run_hook(self, command, payload, cwd):
+    def run_hook(self, command, payload, cwd, extra_env=None):
+        env = {
+            **os.environ,
+            "OH_PERSISTENCE_DIR": str(pathlib.Path(cwd) / ".openhands"),
+        }
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             ["bash", "-lc", command],
             input=json.dumps(payload),
             text=True,
             capture_output=True,
             cwd=cwd,
-            env={**os.environ, "OH_PERSISTENCE_DIR": str(pathlib.Path(cwd) / ".openhands")},
+            env=env,
         )
 
-    def test_manifest_is_v062(self):
+    def write_agent_message_event(self, conversations, session_id, text, event_id):
+        events = conversations / session_id.replace("-", "") / "events"
+        events.mkdir(parents=True, exist_ok=True)
+        path = events / f"event-00001-{event_id}.json"
+        path.write_text(
+            json.dumps({
+                "id": event_id,
+                "kind": "MessageEvent",
+                "source": "agent",
+                "llm_message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": text}],
+                },
+            }),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_manifest_is_v063(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertEqual(manifest["version"], "0.6.2")
+        self.assertEqual(manifest["version"], "0.6.3")
         self.assertIn("dynamic work graph", manifest["description"])
 
     def test_no_authoritative_plan_md(self):
@@ -388,14 +412,109 @@ class V062ContractTests(unittest.TestCase):
 
             self.assertEqual(out["decision"], "deny")
             self.assertIn(
-                "terminal failure requires a verified native finish report",
+                "terminal failure requires canonical failure completion",
                 out["reason"],
             )
+            self.assertIn("Do not call any tool.", out["additionalContext"])
+            self.assertIn("Do not write finish(...).", out["additionalContext"])
             self.assertIn(
                 "BIBLIOTECARIO_FAILURE: executor: "
                 "executor failed or returned invalid result",
                 out["additionalContext"],
             )
+            self.assertFalse((tmp / "FAILURE_REPORT.json").exists())
+
+    def test_stop_accepts_exact_canonical_agent_message(self):
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            terminal = tmp / "TERMINAL_FAILURE.json"
+            terminal.write_text(
+                json.dumps({
+                    "phase": "provenance",
+                    "reason": "CONTRACT hash differs from deterministic lock",
+                }),
+                encoding="utf-8",
+            )
+            expected = (
+                "BIBLIOTECARIO_FAILURE: provenance: "
+                "CONTRACT hash differs from deterministic lock"
+            )
+
+            conversations = wd / "conversations"
+            session_id = "2709b4e0-9208-482c-98f9-fdb5926bc170"
+            event_id = "canonical-failure-event"
+            self.write_agent_message_event(
+                conversations, session_id, expected, event_id
+            )
+
+            p = self.run_hook(
+                self.stop_hook(),
+                {"working_dir": str(wd)},
+                wd,
+                {
+                    "OH_CONVERSATIONS_PATH": str(conversations),
+                    "OPENHANDS_SESSION_ID": session_id,
+                },
+            )
+            self.assertEqual(p.returncode, 0, p.stderr)
+            out = json.loads(p.stdout)
+            self.assertEqual(out["decision"], "allow")
+            self.assertIn("canonical terminal failure", out["reason"])
+
+            report = json.loads((tmp / "FAILURE_REPORT.json").read_text())
+            self.assertEqual(report["schema_version"], 2)
+            self.assertEqual(report["proof"], "Stop:verified-agent-message")
+            self.assertEqual(report["event_id"], event_id)
+            self.assertEqual(report["message"], expected)
+            self.assertEqual(
+                report["terminal_sha256"],
+                hashlib.sha256(terminal.read_bytes()).hexdigest(),
+            )
+
+    def test_stop_rejects_pseudo_finish_text_and_requests_plain_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            wd = pathlib.Path(td)
+            tmp = wd / ".agents_tmp"
+            tmp.mkdir()
+
+            terminal = tmp / "TERMINAL_FAILURE.json"
+            terminal.write_text(
+                json.dumps({
+                    "phase": "provenance",
+                    "reason": "CONTRACT hash differs from deterministic lock",
+                }),
+                encoding="utf-8",
+            )
+            expected = (
+                "BIBLIOTECARIO_FAILURE: provenance: "
+                "CONTRACT hash differs from deterministic lock"
+            )
+            pseudo = f'finish(message="{expected}")'
+
+            conversations = wd / "conversations"
+            session_id = "2709b4e0-9208-482c-98f9-fdb5926bc170"
+            self.write_agent_message_event(
+                conversations, session_id, pseudo, "pseudo-finish-event"
+            )
+
+            p = self.run_hook(
+                self.stop_hook(),
+                {"working_dir": str(wd)},
+                wd,
+                {
+                    "OH_CONVERSATIONS_PATH": str(conversations),
+                    "OPENHANDS_SESSION_ID": session_id,
+                },
+            )
+            self.assertEqual(p.returncode, 0, p.stderr)
+            out = json.loads(p.stdout)
+            self.assertEqual(out["decision"], "deny")
+            self.assertIn(expected, out["additionalContext"])
+            self.assertIn("Do not call any tool.", out["additionalContext"])
+            self.assertIn("Do not write finish(...).", out["additionalContext"])
             self.assertFalse((tmp / "FAILURE_REPORT.json").exists())
 
     def test_stop_rejects_stale_failure_report_hash(self):

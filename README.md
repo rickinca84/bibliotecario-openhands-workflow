@@ -1,9 +1,10 @@
 # bibliotecario-openhands-workflow
 
-## v0.6.2 — Dynamic Verified Work Graph
+## v0.6.3 — Dynamic Verified Work Graph
 
-v0.6.2 removes the authoritative Markdown PLAN and replaces it with a machine-validated,
-dynamic graph suitable for both small fixes and larger repositories.
+v0.6.3 keeps the machine-validated dynamic work graph and fixes a terminal-failure
+Stop loop discovered by forced-failure E2E. The graph remains suitable for both small
+fixes and larger repositories, with no authoritative Markdown PLAN.
 
 ```text
 USER REQUEST
@@ -136,9 +137,11 @@ No Model Router or `switch_llm`.
 - semantic reviewer never runs on deterministic failure;
 - executor text is not authoritative: normal native task completion only hands work to deterministic validation;
 - parent `finish` cannot claim success before final deterministic PASS + reviewer provenance;
-- terminal failures require native `finish` with the exact deterministic failure report;
-- `PostToolUse(finish)` records `FAILURE_REPORT.json`, hash-bound to the current terminal failure;
-- direct assistant completion or a stale failure proof cannot bypass the Stop gate;
+- terminal failures are owned by deterministic `TERMINAL_FAILURE.json`, never by an LLM claim;
+- native `finish` remains accepted when its exact deterministic failure message is used, with `PostToolUse(finish)` producing a hash-bound proof;
+- ordinary OpenHands final text is also accepted only when the latest persisted agent `MessageEvent` exactly equals the canonical deterministic failure message;
+- the Stop hook binds that exact message to the terminal-failure hash and event id in `FAILURE_REPORT.json` (`Stop:verified-agent-message`);
+- pseudo-calls such as textual `finish(message=...)`, direct success claims, and stale failure proofs are rejected;
 - final stop requires current contract + graph + validation + review hashes to agree.
 
 ### Install source
