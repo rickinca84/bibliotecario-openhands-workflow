@@ -57,9 +57,11 @@ MANDATORY RULES
    executor-spark.
 3. Make the contract prescriptive and bounded.
 4. Under both `# Mutable paths` and `# Forbidden paths`, every non-empty line MUST
-   be exactly one bullet containing one backticked workspace-relative literal path:
-   `- \`path/to/file\`` or `- \`path/to/dir/\``. No prose, globs, absolute
-   paths, or `..`.
+   be exactly one bullet containing one backticked workspace-relative literal path.
+   Examples:
+   - `path/to/file`
+   - `path/to/dir/`
+   Do not escape the backticks with backslashes. No prose, globs, absolute paths, or `..`.
 5. Always forbid `.agents_tmp/`. Do not place Git metadata in mutable scope.
 6. Each execution step states READ, MODIFY, CHANGE, DO NOT, and STOP IF.
 7. Freeze deterministic validation before implementation.
