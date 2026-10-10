@@ -62,6 +62,14 @@ MANDATORY RULES
    - `path/to/file`
    - `path/to/dir/`
    Do not escape the backticks with backslashes. No prose, globs, absolute paths, or `..`.
+Before completing, visually verify that the two path sections literally look like this:
+
+# Mutable paths
+- `path/to/file`
+
+# Forbidden paths
+- `.agents_tmp/`
+
 5. Always forbid `.agents_tmp/`. Do not place Git metadata in mutable scope.
 6. Each execution step states READ, MODIFY, CHANGE, DO NOT, and STOP IF.
 7. Freeze deterministic validation before implementation.

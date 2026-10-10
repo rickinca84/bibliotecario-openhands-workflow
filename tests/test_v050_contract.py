@@ -122,6 +122,29 @@ class V052ContractTests(unittest.TestCase):
         intake = hooks["user_prompt_submit"][0]["hooks"][0]["command"]
         self.assertIn(':(exclude).agents_tmp/**', intake)
 
+    def test_executor_preflight_rejects_invalid_plan_before_spark(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        gate = next(
+            item for item in hooks["pre_tool_use"] if item.get("matcher") == "task"
+        )["hooks"][0]["command"]
+        self.assertIn("PLAN_CONTRACT_INVALID before executor", gate)
+        self.assertIn('"verdict":"INVALID_CONTRACT"', gate)
+        self.assertIn("top-level sections must exactly match", gate)
+        self.assertIn("validation commands must contain 1..20 entries", gate)
+
+    def test_planner_retry_allows_deterministic_contract_rejection(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        gate = next(
+            item for item in hooks["pre_tool_use"] if item.get("matcher") == "task"
+        )["hooks"][0]["command"]
+        self.assertIn('pr.get("verdict")=="INVALID_CONTRACT"', gate)
+        self.assertIn("executor REPLAN_REQUIRED or deterministic PLAN contract rejection", gate)
+
+    def test_planner_contains_exact_path_section_template(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("# Mutable paths\n- `path/to/file`", text)
+        self.assertIn("# Forbidden paths\n- `.agents_tmp/`", text)
+
     def test_inline_python_hooks_compile(self):
         paths = [
             ROOT / "hooks" / "hooks.json",
