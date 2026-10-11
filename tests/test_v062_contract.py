@@ -91,6 +91,23 @@ class V063ContractTests(unittest.TestCase):
         for artifact in ("CONTRACT.json", "WORK_GRAPH.json", "CURRENT_WORK_ITEM.json"):
             self.assertIn(artifact, text)
 
+    def test_planner_has_rizzo_mcp_only(self):
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        front = planner.split("---", 2)[1]
+
+        self.assertIn("mcp_config:", front)
+        self.assertIn("rizzo-flow:", front)
+        self.assertIn("url: http://127.0.0.1:18018/mcp", front)
+        self.assertIn("transport: streamable-http", front)
+        self.assertIn("decisions_v1_decisions_post", planner)
+        self.assertIn("Rizzo is advisory semantic evidence", planner)
+
+        for rel in ("agents/executor-spark.md", "agents/reviewer-qwen.md"):
+            text = (ROOT / rel).read_text()
+            other_front = text.split("---", 2)[1]
+            self.assertNotIn("mcp_config:", other_front)
+            self.assertNotIn("decisions_v1_decisions_post", text)
+
     def test_executor_is_native_file_tools_only(self):
         text = (ROOT / "agents" / "executor-spark.md").read_text()
         front = text.split("---", 2)[1]
