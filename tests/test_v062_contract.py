@@ -96,7 +96,7 @@ class V063ContractTests(unittest.TestCase):
         front = planner.split("---", 2)[1]
 
         self.assertIn("skills:", front)
-        self.assertRegex(front, r"(?m)^\\s*- rizzo-flow\\s*$")
+        self.assertRegex(front, r"(?m)^\s*- rizzo-flow\s*$")
         self.assertIn("mcp_config:", front)
         self.assertIn("rizzo-flow:", front)
         self.assertIn("url: http://127.0.0.1:18018/mcp", front)
