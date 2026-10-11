@@ -8,6 +8,8 @@ tools:
   - glob
   - grep
   - write_file
+skills:
+  - rizzo-flow
 mcp_config:
   rizzo-flow:
     url: http://127.0.0.1:18018/mcp
