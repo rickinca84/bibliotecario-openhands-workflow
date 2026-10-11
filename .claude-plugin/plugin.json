@@ -1,6 +1,6 @@
 {
   "name": "bibliotecario-openhands-rizzo-experiment",
   "version": "0.6.3",
-  "description": "Experimental fail-closed OpenHands workflow derived from Bibliotecario v0.6.3 with deterministic orchestration and planner-only Rizzo Flow MCP typed decisions.",
+  "description": "Experimental Bibliotecario v0.6.3 fail-closed OpenHands workflow with deterministic intake, global JSON contract, dynamic work graph, bounded Spark work items, deterministic validation, final Qwen review, and planner-only Rizzo Flow MCP typed decisions.",
   "entry_command": "run"
 }
