@@ -53,14 +53,25 @@ curl -fsS http://127.0.0.1:8017/health
 curl -fsS http://127.0.0.1:18019/health
 ```
 
-The Agent Profile's LLM uses:
+The saved Agent Profile's LLM uses:
 
 ```text
 http://host.docker.internal:18019/v1
 ```
 
-matching the existing pattern used by local model profiles from the conversation
-runtime to reach services hosted in WSL.
+because real conversations run in Docker and resolve `host.docker.internal` to the
+WSL/Docker host.
+
+Native `POST /api/profiles/{name}/validate` is different: that probe runs inside the
+host-side Agent Server process, where `host.docker.internal` is not necessarily
+resolvable. The installer therefore validates an equivalent temporary draft against:
+
+```text
+http://127.0.0.1:18019/v1
+```
+
+and persists the Docker-runtime URL only after that validation succeeds. No WSL IP is
+hardcoded and no `/etc/hosts` change is required.
 
 ## Native preflight — no writes
 
