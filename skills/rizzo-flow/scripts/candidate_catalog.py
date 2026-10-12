@@ -48,7 +48,7 @@ def build_candidates(
                 "bootstrap_qwen_contract",
                 "task",
                 {
-                    "agent": "planner-qwen",
+                    "subagent_type": "planner-qwen",
                     "prompt": (
                         "Interpret the following human request and create the authoritative "
                         "structured CONTRACT.json, WORK_GRAPH.json, and CURRENT_WORK_ITEM.json "
@@ -130,7 +130,7 @@ def build_candidates(
                 "delegate_spark",
                 "task",
                 {
-                    "agent": "executor-spark",
+                    "subagent_type": "executor-spark",
                     "prompt": (
                         "Execute only the current bounded work item in "
                         ".agents_tmp/CURRENT_WORK_ITEM.json. Respect mutable and forbidden "
@@ -152,7 +152,7 @@ def build_candidates(
                 "retry_spark",
                 "task",
                 {
-                    "agent": "executor-spark",
+                    "subagent_type": "executor-spark",
                     "prompt": (
                         "Repair only the current bounded work item using the latest "
                         ".agents_tmp/VALIDATION.json failure evidence. Do not expand scope."
@@ -169,7 +169,7 @@ def build_candidates(
                 "escalate_qwen",
                 "task",
                 {
-                    "agent": "planner-qwen",
+                    "subagent_type": "planner-qwen",
                     "prompt": (
                         "Reassess the current workflow state and update only the allowed "
                         "structured planning artifacts. Preserve the locked CONTRACT.json."
@@ -200,18 +200,6 @@ def build_candidates(
             )
         )
 
-    frozen = state.get("frozen_validation_command")
-    if isinstance(frozen, dict) and isinstance(frozen.get("argv"), list):
-        add_if(
-            "terminal",
-            _candidate(
-                "run_frozen_validation",
-                "terminal",
-                {"argv": frozen["argv"]},
-                frozen.get("description")
-                or "Run the frozen deterministic validation command for the current checkpoint.",
-            ),
-        )
 
     return candidates
 
