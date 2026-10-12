@@ -106,6 +106,24 @@ class V063ContractTests(unittest.TestCase):
         planner = (ROOT / "agents" / "planner-qwen.md").read_text()
         self.assertIn("native/upstream/installable", planner)
 
+    def test_subagent_models_are_explicit_under_rizzo_parent(self):
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        reviewer = (ROOT / "agents" / "reviewer-qwen.md").read_text()
+        executor = (ROOT / "agents" / "executor-spark.md").read_text()
+
+        self.assertRegex(
+            planner.split("---", 2)[1],
+            r"(?m)^model:\s*qwen80b-planner\s*$",
+        )
+        self.assertRegex(
+            reviewer.split("---", 2)[1],
+            r"(?m)^model:\s*qwen80b-planner\s*$",
+        )
+        self.assertRegex(
+            executor.split("---", 2)[1],
+            r"(?m)^model:\s*spark2\.5-4b\s*$",
+        )
+
     def test_executor_is_native_file_tools_only(self):
         text = (ROOT / "agents" / "executor-spark.md").read_text()
         front = text.split("---", 2)[1]
