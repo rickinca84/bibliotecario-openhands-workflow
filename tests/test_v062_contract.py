@@ -106,6 +106,10 @@ class V063ContractTests(unittest.TestCase):
         planner = (ROOT / "agents" / "planner-qwen.md").read_text()
         self.assertIn("native/upstream/installable", planner)
 
+    def test_intake_reports_git_as_available_validator(self):
+        command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn('probe_names=["git","python","python3"', command)
+
     def test_intake_preserves_request_and_does_not_treat_readme_as_instruction(self):
         command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
         self.assertIn('"request_text":message', command)
