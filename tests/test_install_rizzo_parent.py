@@ -23,19 +23,22 @@ class InstallRizzoParentTests(unittest.TestCase):
         self.assertFalse(mod.AGENT_DRAFT["enable_classify_and_switch_llm_tool"])
 
     def test_llm_profile_points_to_host_adapter(self):
+        draft = mod.llm_draft("private-test-key")
         self.assertEqual(
-            mod.LLM_DRAFT["base_url"],
+            draft["base_url"],
             "http://host.docker.internal:18019/v1",
         )
-        self.assertFalse(mod.LLM_DRAFT["stream"])
+        self.assertEqual(draft["api_key"], "private-test-key")
+        self.assertFalse(draft["stream"])
 
     def test_activate_requires_apply(self):
         with self.assertRaises(mod.InstallError):
             mod.run("http://127.0.0.1:8001", False, True)
 
     @patch.object(mod, "_session_key", return_value="secret")
+    @patch.object(mod, "_router_api_key", return_value="router-secret")
     @patch.object(mod, "_request")
-    def test_dry_run_is_read_only_after_validation(self, request, _key):
+    def test_dry_run_is_read_only_after_validation(self, request, _router_key, _key):
         request.side_effect = [
             (200, {"status": "ready"}),  # adapter
             (200, {"status": "ready"}),  # rizzo
@@ -52,8 +55,11 @@ class InstallRizzoParentTests(unittest.TestCase):
         self.assertNotIn("DELETE", methods)
 
     @patch.object(mod, "_session_key", return_value="secret")
+    @patch.object(mod, "_router_api_key", return_value="router-secret")
     @patch.object(mod, "_request")
-    def test_apply_rolls_back_new_profiles_on_materialize_failure(self, request, _key):
+    def test_apply_rolls_back_new_profiles_on_materialize_failure(
+        self, request, _router_key, _key
+    ):
         request.side_effect = [
             (200, {"status": "ready"}),
             (200, {"status": "ready"}),
