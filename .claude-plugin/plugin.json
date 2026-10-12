@@ -1,6 +1,6 @@
 {
-  "name": "bibliotecario-openhands-workflow",
+  "name": "bibliotecario-openhands-rizzo-experiment",
   "version": "0.6.3",
-  "description": "Fail-closed OpenHands workflow with deterministic intake, global JSON contract, dynamic work graph, bounded Spark work items, deterministic validation, and final Qwen review.",
+  "description": "Experimental Bibliotecario v0.6.3 with deterministic intake, dynamic work graph, bounded execution and validation, plus an installable Rizzo Flow top-level action selector via a standard OpenHands Agent Profile and OpenAI-compatible local adapter; Qwen plans/reviews, Spark executes bounded edits, deterministic hooks own PASS/FAIL and stop.",
   "entry_command": "run"
 }

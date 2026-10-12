@@ -91,6 +91,77 @@ class V063ContractTests(unittest.TestCase):
         for artifact in ("CONTRACT.json", "WORK_GRAPH.json", "CURRENT_WORK_ITEM.json"):
             self.assertIn(artifact, text)
 
+    def test_subagents_do_not_depend_on_obsolete_rizzo_mcp_bridge(self):
+        for rel in (
+            "agents/planner-qwen.md",
+            "agents/executor-spark.md",
+            "agents/reviewer-qwen.md",
+        ):
+            text = (ROOT / rel).read_text()
+            front = text.split("---", 2)[1]
+            self.assertNotIn("mcp_config:", front)
+            self.assertNotIn("18018/mcp", text)
+            self.assertNotIn("decisions_v1_decisions_post", text)
+
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("native/upstream/installable", planner)
+
+    def test_intake_reports_git_as_available_validator(self):
+        command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn('probe_names=["git","python","python3"', command)
+
+    def test_intake_preserves_request_and_does_not_treat_readme_as_instruction(self):
+        command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn('"request_text":message', command)
+        self.assertNotIn('low.startswith("readme")', command)
+
+    def test_planner_is_bounded_and_context_lean(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        front = text.split("---", 2)[1]
+        self.assertRegex(front, r"(?m)^max_iteration_per_run:\s*5\s*$")
+        self.assertRegex(front, r"(?m)^condenser:\s*none\s*$")
+        self.assertNotRegex(front, r"(?m)^\s*-\s*glob\s*$")
+        self.assertRegex(front, r"(?m)^\s*-\s*grep\s*$")
+        self.assertIn("issue all three `write_file` calls in the same LLM turn", text)
+
+    def test_planner_anchors_to_request_text_and_requires_validation_commands(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("INTAKE.json.request_text", text)
+        self.assertIn("authoritative human request", text)
+        self.assertIn("MUST contain 1..20 deterministic commands", text)
+
+    def test_session_start_seeds_subagent_llm_profiles(self):
+        hooks = self.hooks()
+        session = hooks["session_start"][0]["hooks"][0]["command"]
+        self.assertIn('"spark2.5-4b"', session)
+        self.assertIn('"qwen80b-planner"', session)
+        self.assertIn(
+            '"http://host.docker.internal:30000/v1"',
+            session,
+        )
+        self.assertIn(
+            '"http://host.docker.internal:8080/v1"',
+            session,
+        )
+
+    def test_subagent_models_are_explicit_under_rizzo_parent(self):
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        reviewer = (ROOT / "agents" / "reviewer-qwen.md").read_text()
+        executor = (ROOT / "agents" / "executor-spark.md").read_text()
+
+        self.assertRegex(
+            planner.split("---", 2)[1],
+            r"(?m)^model:\s*qwen80b-planner\s*$",
+        )
+        self.assertRegex(
+            reviewer.split("---", 2)[1],
+            r"(?m)^model:\s*qwen80b-planner\s*$",
+        )
+        self.assertRegex(
+            executor.split("---", 2)[1],
+            r"(?m)^model:\s*spark2\.5-4b\s*$",
+        )
+
     def test_executor_is_native_file_tools_only(self):
         text = (ROOT / "agents" / "executor-spark.md").read_text()
         front = text.split("---", 2)[1]
@@ -206,6 +277,14 @@ class V063ContractTests(unittest.TestCase):
     def test_same_work_item_retry_requires_local_validation_fail(self):
         gate = self.task_hooks()[0]["command"]
         self.assertIn("same work item may be retried only after deterministic WORK_ITEM validation FAIL", gate)
+
+    def test_preflight_rejects_vacuous_validation_commands(self):
+        gate = self.task_hooks()[0]["command"]
+        self.assertIn("inline Python validator must fail explicitly", gate)
+        self.assertIn("validator may not compare a path with itself", gate)
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("never use a bare boolean expression", planner)
+        self.assertIn("Never compare a file with itself", planner)
 
     def test_validator_uses_shell_false(self):
         validator = self.task_hooks()[1]["command"]

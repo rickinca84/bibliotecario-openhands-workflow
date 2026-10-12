@@ -2,7 +2,7 @@
 name: reviewer-qwen
 description: |
   Performs final project-read-only semantic review after every graph node and global validation have deterministic PASS.
-model: inherit
+model: qwen80b-planner
 tools:
   - read_file
   - glob
