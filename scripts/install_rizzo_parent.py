@@ -12,6 +12,7 @@ active agent profile are never overwritten. Use --activate only together with
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import pathlib
@@ -145,6 +146,10 @@ def _request(
         return exc.code, parsed
     except urllib.error.URLError as exc:
         raise InstallError(f"Cannot reach {url}: {exc.reason}") from exc
+    except (http.client.RemoteDisconnected, ConnectionResetError) as exc:
+        raise InstallError(
+            f"Remote endpoint closed the connection while calling {method} {url}: {exc}"
+        ) from exc
 
 
 def _expect_ok(label: str, result: tuple[int, Any]) -> Any:
