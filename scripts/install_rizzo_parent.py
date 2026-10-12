@@ -253,11 +253,57 @@ def _verify_existing_llm(detail: dict[str, Any], runtime_llm: dict[str, Any]) ->
         raise InstallError("existing experimental LLM profile has no stored API key")
 
 
+def _normalize_tools(value: Any) -> list[tuple[str, str]]:
+    """Normalize profile tool specs; missing params and {} are equivalent."""
+    if not isinstance(value, list):
+        raise InstallError("existing_agent.profile.tools is not a list")
+
+    normalized: list[tuple[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise InstallError(
+                f"existing_agent.profile.tools[{index}] is not a valid tool spec"
+            )
+        params = item.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise InstallError(
+                f"existing_agent.profile.tools[{index}].params is not an object"
+            )
+        normalized.append(
+            (
+                item["name"],
+                json.dumps(params, sort_keys=True, separators=(",", ":")),
+            )
+        )
+
+    # Tool selection is semantic, not positional. OpenHands canonicalizes/merges
+    # profile tool specs before persistence.
+    return sorted(normalized)
+
+
 def _verify_existing_agent(detail: dict[str, Any]) -> None:
     profile = detail.get("profile")
     if not isinstance(profile, dict):
         raise InstallError("existing experimental Agent Profile has no profile object")
-    _assert_subset(profile, AGENT_DRAFT, "existing_agent.profile")
+
+    expected_without_tools = {
+        key: value for key, value in AGENT_DRAFT.items() if key != "tools"
+    }
+    _assert_subset(
+        profile,
+        expected_without_tools,
+        "existing_agent.profile",
+    )
+
+    actual_tools = _normalize_tools(profile.get("tools"))
+    expected_tools = _normalize_tools(AGENT_DRAFT["tools"])
+    if actual_tools != expected_tools:
+        raise InstallError(
+            "existing_agent.profile.tools differs from the expected experimental "
+            f"profile (expected {expected_tools!r}, got {actual_tools!r})"
+        )
 
 
 def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
