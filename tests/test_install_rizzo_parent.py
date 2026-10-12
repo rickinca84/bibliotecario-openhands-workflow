@@ -86,6 +86,108 @@ class InstallRizzoParentTests(unittest.TestCase):
         methods = [c.kwargs.get("method", "GET") for c in request.call_args_list]
         self.assertEqual(methods[-2:], ["DELETE", "DELETE"])
 
+    @patch.object(mod, "_session_key", return_value="secret")
+    @patch.object(mod, "_router_api_key", return_value="router-secret")
+    @patch.object(mod, "_request")
+    def test_apply_reuses_matching_existing_llm_and_creates_only_agent(
+        self, request, _router_key, _key
+    ):
+        runtime = mod.llm_draft("router-secret")
+        llm_detail = {
+            "name": mod.LLM_PROFILE,
+            "config": {**runtime, "api_key": None},
+            "api_key_set": True,
+        }
+
+        request.side_effect = [
+            (200, {"status": "ready"}),
+            (200, {"status": "ready"}),
+            (200, {"ok": True}),
+            (200, {"profiles": [{"name": mod.LLM_PROFILE}], "active_profile": "stable"}),
+            (200, {"profiles": [], "active_agent_profile_id": "stable-agent"}),
+            (200, llm_detail),
+            (200, {"valid": True}),
+            (200, {"valid": True, "errors": [], "warnings": []}),
+            (201, {"name": mod.AGENT_PROFILE}),
+            (
+                200,
+                {
+                    "profiles": [{"name": mod.LLM_PROFILE}],
+                    "active_profile": "stable",
+                },
+            ),
+            (
+                200,
+                {
+                    "profiles": [
+                        {"name": mod.AGENT_PROFILE, "id": "rizzo-agent-id"}
+                    ],
+                    "active_agent_profile_id": "stable-agent",
+                },
+            ),
+            (200, llm_detail),
+            (
+                200,
+                {
+                    "name": mod.AGENT_PROFILE,
+                    "profile": {
+                        **mod.AGENT_DRAFT,
+                        "name": mod.AGENT_PROFILE,
+                        "id": "rizzo-agent-id",
+                    },
+                },
+            ),
+        ]
+
+        result = mod.run("http://127.0.0.1:8001", True, False)
+        self.assertTrue(result["preexisting_llm_profile"])
+        self.assertFalse(result["preexisting_agent_profile"])
+        self.assertEqual(
+            result["created_this_run"],
+            {"llm_profile": False, "agent_profile": True},
+        )
+
+        posts = [
+            c.args[0]
+            for c in request.call_args_list
+            if c.kwargs.get("method", "GET") == "POST"
+        ]
+        self.assertNotIn(
+            "http://127.0.0.1:8001/api/profiles/" + mod.LLM_PROFILE,
+            posts,
+        )
+
+    @patch.object(mod, "_session_key", return_value="secret")
+    @patch.object(mod, "_router_api_key", return_value="router-secret")
+    @patch.object(mod, "_request")
+    def test_mismatched_existing_llm_fails_without_mutation(
+        self, request, _router_key, _key
+    ):
+        runtime = mod.llm_draft("router-secret")
+        bad = {
+            "name": mod.LLM_PROFILE,
+            "config": {
+                **runtime,
+                "api_key": None,
+                "base_url": "http://wrong.invalid/v1",
+            },
+            "api_key_set": True,
+        }
+        request.side_effect = [
+            (200, {"status": "ready"}),
+            (200, {"status": "ready"}),
+            (200, {"ok": True}),
+            (200, {"profiles": [{"name": mod.LLM_PROFILE}], "active_profile": "stable"}),
+            (200, {"profiles": [], "active_agent_profile_id": "stable-agent"}),
+            (200, bad),
+        ]
+
+        with self.assertRaises(mod.InstallError):
+            mod.run("http://127.0.0.1:8001", True, False)
+
+        methods = [c.kwargs.get("method", "GET") for c in request.call_args_list]
+        self.assertNotIn("DELETE", methods)
+
 
 if __name__ == "__main__":
     unittest.main()
