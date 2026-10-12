@@ -2,7 +2,7 @@
 name: planner-qwen
 description: |
   Maintains Bibliotecario global contract, dynamic work graph, and the next bounded work item.
-model: inherit
+model: qwen80b-planner
 tools:
   - read_file
   - glob
