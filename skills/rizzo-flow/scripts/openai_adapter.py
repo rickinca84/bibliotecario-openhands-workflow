@@ -163,7 +163,7 @@ def completion_for(payload: dict[str, Any], *, chooser=None) -> dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RizzoOpenAIAdapter/0.2"
+    server_version = "RizzoOpenAIAdapter/0.3"
     router_api_key: str = ""
 
     def _json(self, status: int, body: Any) -> None:
@@ -173,6 +173,88 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _sse(self, completion: dict[str, Any]) -> None:
+        """Emit one deterministic tool decision as OpenAI chat-completion SSE."""
+        choice = completion["choices"][0]
+        message = choice["message"]
+        tool_calls = message.get("tool_calls") or []
+        created = completion["created"]
+        model = completion["model"]
+        completion_id = completion["id"]
+
+        chunks: list[dict[str, Any]] = [
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ]
+
+        if tool_calls:
+            tc = tool_calls[0]
+            chunks.append(
+                {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": tc["id"],
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc["function"]["name"],
+                                            "arguments": tc["function"]["arguments"],
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+            )
+
+        chunks.append(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": choice.get("finish_reason") or "stop",
+                    }
+                ],
+            }
+        )
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for chunk in chunks:
+            raw = json.dumps(chunk, ensure_ascii=False, separators=(",", ":"))
+            self.wfile.write(f"data: {raw}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
 
     def _read_json(self) -> dict[str, Any]:
         raw_length = self.headers.get("Content-Length")
@@ -223,16 +305,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_json()
-            if payload.get("stream") is True:
-                raise RoutingError(
-                    "streaming is intentionally disabled for the Rizzo router profile"
-                )
             result = completion_for(payload)
         except (RoutingError, json.JSONDecodeError, ValueError) as exc:
             self._json(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
                 {"error": {"message": str(exc), "type": "rizzo_router_error"}},
             )
+            return
+        if payload.get("stream") is True:
+            self._sse(result)
             return
         self._json(HTTPStatus.OK, result)
 
