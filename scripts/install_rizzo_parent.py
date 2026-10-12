@@ -403,9 +403,14 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
                 timeout=120,
             ),
         )
-        result["materialize"] = materialized
         if not isinstance(materialized, dict) or materialized.get("valid") is not True:
             raise InstallError(f"Agent Profile materialize rejected the draft: {materialized}")
+
+        result["materialize"] = {
+            "valid": materialized.get("valid"),
+            "errors": materialized.get("errors") or [],
+            "warnings": materialized.get("warnings") or [],
+        }
 
         if not agent_exists:
             _expect_ok(
