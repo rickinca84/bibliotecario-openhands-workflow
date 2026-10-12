@@ -203,6 +203,63 @@ def _agent_profile_id(payload: dict[str, Any], name: str) -> str | None:
     return None
 
 
+def _get_llm_profile(base: str, key: str) -> dict[str, Any]:
+    body = _expect_ok(
+        "read existing experimental LLM profile",
+        _request(f"{base}/api/profiles/{LLM_PROFILE}", key=key, timeout=30),
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def _get_agent_profile(base: str, key: str) -> dict[str, Any]:
+    body = _expect_ok(
+        "read existing experimental Agent Profile",
+        _request(f"{base}/api/agent-profiles/{AGENT_PROFILE}", key=key, timeout=30),
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def _assert_subset(actual: Any, expected: Any, path: str = "profile") -> None:
+    """Require every expected field/value to be present; tolerate server-added defaults."""
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            raise InstallError(f"{path} is not an object")
+        for key, value in expected.items():
+            if key not in actual:
+                raise InstallError(f"{path}.{key} is missing")
+            _assert_subset(actual[key], value, f"{path}.{key}")
+        return
+    if isinstance(expected, list):
+        if actual != expected:
+            raise InstallError(f"{path} differs from the expected experimental profile")
+        return
+    if actual != expected:
+        raise InstallError(
+            f"{path} differs from the expected experimental profile "
+            f"(expected {expected!r}, got {actual!r})"
+        )
+
+
+def _verify_existing_llm(detail: dict[str, Any], runtime_llm: dict[str, Any]) -> None:
+    config = detail.get("config")
+    if not isinstance(config, dict):
+        raise InstallError("existing experimental LLM profile has no config object")
+
+    # Secrets are intentionally masked on ordinary GET. Verify every non-secret field
+    # and require the profile store to report that a key exists.
+    expected = {k: v for k, v in runtime_llm.items() if k != "api_key"}
+    _assert_subset(config, expected, "existing_llm.config")
+    if detail.get("api_key_set") is not True:
+        raise InstallError("existing experimental LLM profile has no stored API key")
+
+
+def _verify_existing_agent(detail: dict[str, Any]) -> None:
+    profile = detail.get("profile")
+    if not isinstance(profile, dict):
+        raise InstallError("existing experimental Agent Profile has no profile object")
+    _assert_subset(profile, AGENT_DRAFT, "existing_agent.profile")
+
+
 def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
     if activate and not apply:
         raise InstallError("--activate requires --apply")
@@ -222,14 +279,19 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
     active_llm_before = llm_before.get("active_profile")
     active_agent_before = agent_before.get("active_agent_profile_id")
 
-    if LLM_PROFILE in _profile_names(llm_before):
+    llm_exists = LLM_PROFILE in _profile_names(llm_before)
+    agent_exists = AGENT_PROFILE in _profile_names(agent_before)
+
+    if agent_exists and not llm_exists:
         raise InstallError(
-            f"LLM profile {LLM_PROFILE!r} already exists; refusing to overwrite it."
+            "experimental Agent Profile exists but its LLM profile is missing; "
+            "refusing to mutate this inconsistent pre-existing state"
         )
-    if AGENT_PROFILE in _profile_names(agent_before):
-        raise InstallError(
-            f"Agent profile {AGENT_PROFILE!r} already exists; refusing to overwrite it."
-        )
+
+    if llm_exists:
+        _verify_existing_llm(_get_llm_profile(base, key), runtime_llm)
+    if agent_exists:
+        _verify_existing_agent(_get_agent_profile(base, key))
 
     llm_validation = _expect_ok(
         "native LLM profile validation",
@@ -258,6 +320,8 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
         "llm_profile": LLM_PROFILE,
         "agent_profile": AGENT_PROFILE,
         "activated": False,
+        "preexisting_llm_profile": llm_exists,
+        "preexisting_agent_profile": agent_exists,
     }
 
     if not apply:
@@ -267,15 +331,20 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
         )
         return result
 
-    _expect_ok(
-        "save isolated LLM profile",
-        _request(
-            f"{base}/api/profiles/{LLM_PROFILE}",
-            key=key,
-            method="POST",
-            body={"llm": runtime_llm, "include_secrets": True},
-        ),
-    )
+    created_llm = False
+    created_agent = False
+
+    if not llm_exists:
+        _expect_ok(
+            "save isolated LLM profile",
+            _request(
+                f"{base}/api/profiles/{LLM_PROFILE}",
+                key=key,
+                method="POST",
+                body={"llm": runtime_llm, "include_secrets": True},
+            ),
+        )
+        created_llm = True
 
     try:
         materialized = _expect_ok(
@@ -292,15 +361,17 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
         if not isinstance(materialized, dict) or materialized.get("valid") is not True:
             raise InstallError(f"Agent Profile materialize rejected the draft: {materialized}")
 
-        _expect_ok(
-            "save isolated Agent Profile",
-            _request(
-                f"{base}/api/agent-profiles/{AGENT_PROFILE}",
-                key=key,
-                method="POST",
-                body=AGENT_DRAFT,
-            ),
-        )
+        if not agent_exists:
+            _expect_ok(
+                "save isolated Agent Profile",
+                _request(
+                    f"{base}/api/agent-profiles/{AGENT_PROFILE}",
+                    key=key,
+                    method="POST",
+                    body=AGENT_DRAFT,
+                ),
+            )
+            created_agent = True
 
         llm_after = _list_profiles(base, key, "/api/profiles")
         agent_after = _list_profiles(base, key, "/api/agent-profiles")
@@ -353,6 +424,10 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             raise InstallError("saved Agent Profile points to the wrong LLM profile")
 
         result["agent_profile_id"] = profile_id
+        result["created_this_run"] = {
+            "llm_profile": created_llm,
+            "agent_profile": created_agent,
+        }
         result["post_install_verification"] = {
             "llm_profile_present": True,
             "agent_profile_present": True,
@@ -377,18 +452,20 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
                 raise InstallError("Agent Profile activation did not set the expected profile id")
             result["activated"] = True
     except Exception:
-        # Roll back only artifacts created by this invocation. The stable Qwen
-        # and Spark profiles are separate names and remain untouched.
-        _request(
-            f"{base}/api/agent-profiles/{AGENT_PROFILE}",
-            key=key,
-            method="DELETE",
-        )
-        _request(
-            f"{base}/api/profiles/{LLM_PROFILE}",
-            key=key,
-            method="DELETE",
-        )
+        # Roll back ONLY artifacts created by this invocation. Never delete or
+        # overwrite a matching profile that existed before this run.
+        if created_agent:
+            _request(
+                f"{base}/api/agent-profiles/{AGENT_PROFILE}",
+                key=key,
+                method="DELETE",
+            )
+        if created_llm:
+            _request(
+                f"{base}/api/profiles/{LLM_PROFILE}",
+                key=key,
+                method="DELETE",
+            )
         raise
 
     return result
