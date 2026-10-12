@@ -51,6 +51,7 @@ def llm_draft(router_api_key: str) -> dict[str, Any]:
         "api_key": router_api_key,
         "base_url": "http://host.docker.internal:18019/v1",
         "usage_id": "rizzo-bibliotecario-router",
+        "api_mode": "chat",
         "stream": False,
     }
 
