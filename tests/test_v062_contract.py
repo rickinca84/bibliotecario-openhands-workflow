@@ -274,6 +274,14 @@ class V063ContractTests(unittest.TestCase):
         gate = self.task_hooks()[0]["command"]
         self.assertIn("same work item may be retried only after deterministic WORK_ITEM validation FAIL", gate)
 
+    def test_preflight_rejects_vacuous_validation_commands(self):
+        gate = self.task_hooks()[0]["command"]
+        self.assertIn("inline Python validator must fail explicitly", gate)
+        self.assertIn("validator may not compare a path with itself", gate)
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("never use a bare boolean expression", planner)
+        self.assertIn("Never compare a file with itself", planner)
+
     def test_validator_uses_shell_false(self):
         validator = self.task_hooks()[1]["command"]
         self.assertIn("shell=False", validator)
