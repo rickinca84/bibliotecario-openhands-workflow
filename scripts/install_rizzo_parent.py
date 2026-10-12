@@ -219,6 +219,8 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
 
     llm_before = _list_profiles(base, key, "/api/profiles")
     agent_before = _list_profiles(base, key, "/api/agent-profiles")
+    active_llm_before = llm_before.get("active_profile")
+    active_agent_before = agent_before.get("active_agent_profile_id")
 
     if LLM_PROFILE in _profile_names(llm_before):
         raise InstallError(
@@ -300,11 +302,66 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             ),
         )
 
-        after = _list_profiles(base, key, "/api/agent-profiles")
-        profile_id = _agent_profile_id(after, AGENT_PROFILE)
+        llm_after = _list_profiles(base, key, "/api/profiles")
+        agent_after = _list_profiles(base, key, "/api/agent-profiles")
+        profile_id = _agent_profile_id(agent_after, AGENT_PROFILE)
+        if LLM_PROFILE not in _profile_names(llm_after):
+            raise InstallError("saved LLM profile is not present in native profile list")
         if not profile_id:
             raise InstallError("saved Agent Profile is not present in native profile list")
+
+        if llm_after.get("active_profile") != active_llm_before:
+            raise InstallError("saving experimental LLM profile changed the active LLM profile")
+        if agent_after.get("active_agent_profile_id") != active_agent_before:
+            raise InstallError("saving experimental Agent Profile changed the active Agent Profile")
+
+        llm_detail = _expect_ok(
+            "verify saved LLM profile",
+            _request(
+                f"{base}/api/profiles/{LLM_PROFILE}",
+                key=key,
+                timeout=30,
+            ),
+        )
+        agent_detail = _expect_ok(
+            "verify saved Agent Profile",
+            _request(
+                f"{base}/api/agent-profiles/{AGENT_PROFILE}",
+                key=key,
+                timeout=30,
+            ),
+        )
+
+        llm_config = llm_detail.get("config") if isinstance(llm_detail, dict) else None
+        if not isinstance(llm_config, dict):
+            raise InstallError("saved LLM profile detail has no config object")
+        if llm_config.get("base_url") != runtime_llm["base_url"]:
+            raise InstallError(
+                "saved LLM profile runtime base_url does not match Docker runtime URL"
+            )
+        if llm_config.get("api_mode") != "chat":
+            raise InstallError("saved LLM profile did not preserve api_mode=chat")
+        if llm_detail.get("api_key_set") is not True:
+            raise InstallError("saved LLM profile does not report an API key")
+
+        stored_agent = (
+            agent_detail.get("profile") if isinstance(agent_detail, dict) else None
+        )
+        if not isinstance(stored_agent, dict):
+            raise InstallError("saved Agent Profile detail has no profile object")
+        if stored_agent.get("llm_profile_ref") != LLM_PROFILE:
+            raise InstallError("saved Agent Profile points to the wrong LLM profile")
+
         result["agent_profile_id"] = profile_id
+        result["post_install_verification"] = {
+            "llm_profile_present": True,
+            "agent_profile_present": True,
+            "runtime_base_url": llm_config.get("base_url"),
+            "api_mode": llm_config.get("api_mode"),
+            "api_key_set": llm_detail.get("api_key_set"),
+            "active_llm_unchanged": True,
+            "active_agent_unchanged": True,
+        }
 
         if activate:
             _expect_ok(
@@ -315,6 +372,9 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
                     method="POST",
                 ),
             )
+            activated = _list_profiles(base, key, "/api/agent-profiles")
+            if activated.get("active_agent_profile_id") != profile_id:
+                raise InstallError("Agent Profile activation did not set the expected profile id")
             result["activated"] = True
     except Exception:
         # Roll back only artifacts created by this invocation. The stable Qwen
