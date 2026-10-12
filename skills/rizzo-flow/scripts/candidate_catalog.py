@@ -40,6 +40,27 @@ def build_candidates(
         if tool in tools:
             candidates.append(candidate)
 
+    human_request = state.get("human_request")
+    if not state.get("has_contract") and isinstance(human_request, str) and human_request.strip():
+        add_if(
+            "task",
+            _candidate(
+                "bootstrap_qwen_contract",
+                "task",
+                {
+                    "agent": "planner-qwen",
+                    "prompt": (
+                        "Interpret the following human request and create the authoritative "
+                        "structured CONTRACT.json, WORK_GRAPH.json, and CURRENT_WORK_ITEM.json "
+                        "according to Bibliotecario policy. First inspect INTAKE.json and the "
+                        "repository as needed. Human request:\n\n" + human_request.strip()
+                    ),
+                },
+                "Ask Qwen once to convert the free-form human request into Bibliotecario's structured contract and first bounded work item.",
+            ),
+        )
+        return candidates
+
     if state.get("has_contract"):
         add_if(
             "read_file",
