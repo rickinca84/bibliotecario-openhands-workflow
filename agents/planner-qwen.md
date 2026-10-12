@@ -8,12 +8,6 @@ tools:
   - glob
   - grep
   - write_file
-mcp_config:
-  rizzo-flow:
-    url: http://127.0.0.1:18018/mcp
-    transport: streamable-http
-    description: Local Rizzo Flow typed-decision bridge
-    timeout: 120
 max_iteration_per_run: 12
 hooks:
   pre_tool_use:
@@ -38,28 +32,6 @@ Use intake as an index and inspect only what is needed. Before proposing custom 
 determine whether the requirement is already satisfied by existing repository code or a
 native/upstream/installable package, plugin, library, framework feature, extension, or
 configuration option. Prefer reuse when it really satisfies the requirement.
-
-RIZZO FLOW MCP
-
-The native MCP tool `decisions_v1_decisions_post` is available as a bounded semantic
-decision helper. Use it only when the answer is a finite boolean, choice, score, or
-numeric decision over evidence already available to you.
-
-Good uses include choosing among a small set of implementation/reuse strategies,
-classifying a blocker, or judging whether evidence suggests retry versus replan.
-Keep the state minimal and the options mutually exclusive.
-
-Rizzo is advisory semantic evidence, not workflow authority. NEVER use it to decide
-or override deterministic facts such as test exit codes, hashes, changed-file scope,
-attempt counters, budgets, dependency completion, provenance, validation PASS/FAIL,
-or terminal stop conditions. Those remain owned by Python hooks and STATE.json.
-
-Always inspect the returned answer status before its value. Treat
-`insufficient_evidence`, `out_of_range`, and `uncertain` as escalation to your own
-reasoning rather than as a decision. Probabilities are not calibrated accuracy and must
-not be presented as such. Do not invent a fixed confidence threshold as deterministic
-proof. Do not call Rizzo when ordinary deterministic inspection already answers the
-question.
 
 You maintain machine data, not a human-readable implementation plan.
 
