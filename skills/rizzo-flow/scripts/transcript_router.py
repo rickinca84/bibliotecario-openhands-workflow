@@ -130,6 +130,11 @@ def _extract_failure_message(evidence: str) -> str | None:
     return matches[-1].strip() if matches else None
 
 
+def _extract_contract_invalid(evidence: str) -> str | None:
+    matches = re.findall(r"WORK_CONTRACT_INVALID before executor:[^\r\n]+", evidence)
+    return matches[-1].strip() if matches else None
+
+
 def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
     evidence = _evidence_text(messages)
     lower = evidence.lower()
@@ -164,6 +169,7 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
             "all graph nodes and final deterministic validation pass",
         )
     )
+    contract_invalid = _extract_contract_invalid(evidence)
 
     last_task_completed = False
     if last:
@@ -186,6 +192,7 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "retry_executor": retry_executor,
         "planner_directive": planner_directive,
         "reviewer_allowed": reviewer_allowed,
+        "contract_invalid": contract_invalid,
         "failure_message": _extract_failure_message(evidence),
         "evidence_tail": evidence[-6000:],
     }
@@ -243,6 +250,20 @@ def deterministic_candidates(
 
     human = str(state.get("human_request") or "").strip()
     last = state.get("last_subagent")
+
+    if state.get("contract_invalid"):
+        return [
+            _task(
+                "planner-qwen",
+                (
+                    "The deterministic preflight rejected the current planning artifacts. "
+                    "Correct the existing CONTRACT.json / WORK_GRAPH.json / CURRENT_WORK_ITEM.json "
+                    "without changing the human objective. Exact rejection:\n\n"
+                    + str(state["contract_invalid"])
+                ),
+                "Repair an invalid planning contract using the exact deterministic rejection.",
+            )
+        ]
 
     if not last:
         if not human:
