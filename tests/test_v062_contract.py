@@ -106,6 +106,17 @@ class V063ContractTests(unittest.TestCase):
         planner = (ROOT / "agents" / "planner-qwen.md").read_text()
         self.assertIn("native/upstream/installable", planner)
 
+    def test_intake_preserves_request_and_does_not_treat_readme_as_instruction(self):
+        command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
+        self.assertIn('"request_text":message', command)
+        self.assertNotIn('low.startswith("readme")', command)
+
+    def test_planner_anchors_to_request_text_and_requires_validation_commands(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("INTAKE.json.request_text", text)
+        self.assertIn("authoritative human request", text)
+        self.assertIn("MUST contain 1..20 deterministic commands", text)
+
     def test_session_start_seeds_subagent_llm_profiles(self):
         hooks = self.hooks()
         session = hooks["session_start"][0]["hooks"][0]["command"]
