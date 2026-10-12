@@ -84,7 +84,16 @@ class InstallRizzoParentTests(unittest.TestCase):
         with self.assertRaises(mod.InstallError):
             mod.run("http://127.0.0.1:8001", True, False)
         methods = [c.kwargs.get("method", "GET") for c in request.call_args_list]
-        self.assertEqual(methods[-2:], ["DELETE", "DELETE"])
+        self.assertEqual(methods[-1:], ["DELETE"])
+        deleted_urls = [
+            c.args[0]
+            for c in request.call_args_list
+            if c.kwargs.get("method", "GET") == "DELETE"
+        ]
+        self.assertEqual(
+            deleted_urls,
+            ["http://127.0.0.1:8001/api/profiles/" + mod.LLM_PROFILE],
+        )
 
     @patch.object(mod, "_session_key", return_value="secret")
     @patch.object(mod, "_router_api_key", return_value="router-secret")
