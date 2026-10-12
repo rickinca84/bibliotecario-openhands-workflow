@@ -170,6 +170,34 @@ class TranscriptRouterTests(unittest.TestCase):
         with self.assertRaises(tr.RoutingError):
             tr.choose_next([user("x")], [TOOLS[1]])
 
+    def test_native_profile_validation_probe_is_allowed_without_tools(self):
+        payload = {
+            "model": "openai/rizzo-router",
+            "messages": [
+                {"role": "system", "content": "Reply with one token."},
+                {"role": "user", "content": "ping"},
+            ],
+            "max_tokens": 1,
+        }
+        result = oa.completion_for(payload)
+        choice = result["choices"][0]
+        self.assertEqual(choice["finish_reason"], "stop")
+        self.assertEqual(choice["message"]["content"], "OK")
+        self.assertEqual(
+            result["x_rizzo"]["route_source"],
+            "openhands_profile_validation_probe",
+        )
+
+    def test_arbitrary_tool_less_completion_fails_closed(self):
+        with self.assertRaises(tr.RoutingError):
+            oa.completion_for(
+                {
+                    "model": "openai/rizzo-router",
+                    "messages": [user("hello")],
+                    "max_tokens": 1,
+                }
+            )
+
     def test_openai_completion_is_native_tool_call(self):
         payload = {"model": "openai/rizzo-router", "messages": [user("x")], "tools": TOOLS}
         result = oa.completion_for(
