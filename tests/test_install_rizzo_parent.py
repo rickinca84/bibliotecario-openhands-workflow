@@ -22,14 +22,23 @@ class InstallRizzoParentTests(unittest.TestCase):
         self.assertFalse(mod.AGENT_DRAFT["verification"]["critic_enabled"])
         self.assertFalse(mod.AGENT_DRAFT["enable_classify_and_switch_llm_tool"])
 
-    def test_llm_profile_points_to_host_adapter(self):
-        draft = mod.llm_draft("private-test-key")
+    def test_llm_profile_separates_host_validation_and_docker_runtime_urls(self):
+        runtime = mod.llm_draft("private-test-key")
+        validation = mod.validation_llm_draft("private-test-key")
         self.assertEqual(
-            draft["base_url"],
+            runtime["base_url"],
             "http://host.docker.internal:18019/v1",
         )
-        self.assertEqual(draft["api_key"], "private-test-key")
-        self.assertFalse(draft["stream"])
+        self.assertEqual(
+            validation["base_url"],
+            "http://127.0.0.1:18019/v1",
+        )
+        self.assertEqual(runtime["api_key"], "private-test-key")
+        self.assertEqual(validation["api_key"], "private-test-key")
+        self.assertEqual(runtime["api_mode"], "chat")
+        self.assertEqual(validation["api_mode"], "chat")
+        self.assertFalse(runtime["stream"])
+        self.assertFalse(validation["stream"])
 
     def test_activate_requires_apply(self):
         with self.assertRaises(mod.InstallError):
