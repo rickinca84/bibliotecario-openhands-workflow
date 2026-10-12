@@ -30,13 +30,67 @@ MODEL_ID = os.environ.get("RIZZO_OPENAI_MODEL", "rizzo-bibliotecario-router")
 MAX_BODY_BYTES = int(os.environ.get("RIZZO_OPENAI_MAX_BODY_BYTES", str(2 * 1024 * 1024)))
 
 
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def is_native_validation_probe(payload: dict[str, Any]) -> bool:
+    """Recognize OpenHands' own /profiles/{name}/validate one-token probe only."""
+    messages = payload.get("messages")
+    tools = payload.get("tools")
+    if tools not in (None, []):
+        return False
+    if payload.get("max_tokens") != 1 or not isinstance(messages, list) or len(messages) != 2:
+        return False
+    system, user = messages
+    if not isinstance(system, dict) or not isinstance(user, dict):
+        return False
+    return (
+        system.get("role") == "system"
+        and _message_text(system).strip() == "Reply with one token."
+        and user.get("role") == "user"
+        and _message_text(user).strip() == "ping"
+    )
+
+
+def _probe_completion(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-rizzo-probe-" + uuid.uuid4().hex,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": payload.get("model") or MODEL_ID,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "OK"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 1, "total_tokens": 1},
+        "x_rizzo": {"route_source": "openhands_profile_validation_probe"},
+    }
+
+
 def completion_for(payload: dict[str, Any], *, chooser=None) -> dict[str, Any]:
     messages = payload.get("messages")
     tools = payload.get("tools")
     if not isinstance(messages, list):
         raise RoutingError("messages must be a list")
-    if not isinstance(tools, list):
-        raise RoutingError("tools must be a list; router cannot invent unavailable tools")
+    if is_native_validation_probe(payload):
+        return _probe_completion(payload)
+    if not isinstance(tools, list) or not tools:
+        raise RoutingError(
+            "real router turns require native OpenHands tools; refusing tool-less completion"
+        )
 
     kwargs = {} if chooser is None else {"chooser": chooser}
     candidate, state, route_source = choose_next(messages, tools, **kwargs)
