@@ -37,6 +37,15 @@ Run the OpenAI-compatible parent adapter from this plugin checkout:
 python3 skills/rizzo-flow/scripts/openai_adapter.py --host 0.0.0.0 --port 18019
 ```
 
+On first start the adapter generates a random bearer token at
+`~/.openhands/rizzo-router/api-key.txt` with mode `0600`. The token is never printed.
+The installer reads the same file and saves it through the native LLM-profile secret
+path. Set `RIZZO_ROUTER_API_KEY` on both processes instead if you want to supply your
+own token.
+
+Only health/model discovery is unauthenticated. `POST /v1/chat/completions` requires
+the bearer token because the request can contain repository/conversation context.
+
 Health checks:
 
 ```bash
