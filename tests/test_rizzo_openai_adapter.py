@@ -88,6 +88,27 @@ class TranscriptRouterTests(unittest.TestCase):
         self.assertEqual(selected.arguments["subagent_type"], "reviewer-qwen")
         self.assertIn("PreToolUse", selected.arguments["prompt"])
 
+    def test_invalid_contract_routes_directly_to_planner_with_exact_reason(self):
+        messages = [
+            user("Implement CSV export"),
+            assistant_task("planner-qwen"),
+            tool("Task ID: 1\nSubagent: planner-qwen\nStatus: completed\nPLANNING_RESULT: READY"),
+            assistant_task("executor-spark"),
+            tool(
+                "WORK_CONTRACT_INVALID before executor: "
+                "CONTRACT final_validation_commands validator may not compare a path with itself"
+            ),
+        ]
+        selected, state, source = tr.choose_next(
+            messages,
+            TOOLS,
+            chooser=lambda *_: self.fail("contract-invalid routing must be deterministic"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertIn("validator may not compare a path with itself", selected.arguments["prompt"])
+        self.assertIn("WORK_CONTRACT_INVALID before executor", state["contract_invalid"])
+
     def test_work_item_failure_retries_same_spark(self):
         messages = [
             user("Implement CSV export"),
