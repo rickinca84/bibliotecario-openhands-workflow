@@ -28,13 +28,31 @@ DEFAULT_RIZZO_HEALTH = "http://127.0.0.1:8017/health"
 LLM_PROFILE = "rizzo-bibliotecario-router"
 AGENT_PROFILE = "bibliotecario-rizzo-experiment"
 
-LLM_DRAFT = {
-    "model": "openai/rizzo-bibliotecario-router",
-    "api_key": "local",
-    "base_url": "http://host.docker.internal:18019/v1",
-    "usage_id": "rizzo-bibliotecario-router",
-    "stream": False,
-}
+ROUTER_KEY_FILE = pathlib.Path.home() / ".openhands" / "rizzo-router" / "api-key.txt"
+
+
+def _router_api_key() -> str:
+    value = os.environ.get("RIZZO_ROUTER_API_KEY")
+    if value and value.strip():
+        return value.strip()
+    if ROUTER_KEY_FILE.is_file():
+        value = ROUTER_KEY_FILE.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    raise InstallError(
+        "Rizzo router API key not found. Start openai_adapter.py once, or set "
+        "RIZZO_ROUTER_API_KEY."
+    )
+
+
+def llm_draft(router_api_key: str) -> dict[str, Any]:
+    return {
+        "model": "openai/rizzo-bibliotecario-router",
+        "api_key": router_api_key,
+        "base_url": "http://host.docker.internal:18019/v1",
+        "usage_id": "rizzo-bibliotecario-router",
+        "stream": False,
+    }
 
 # Explicit tool list scopes delegated agents. This is intentionally the union of
 # tools required by planner-qwen, executor-spark and reviewer-qwen plus task
@@ -167,6 +185,8 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
         raise InstallError("--activate requires --apply")
 
     key = _session_key()
+    router_key = _router_api_key()
+    llm = llm_draft(router_key)
     base = base.rstrip("/")
 
     adapter = _expect_ok("Rizzo OpenAI adapter health", _request(DEFAULT_ADAPTER_HEALTH))
@@ -191,7 +211,7 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             f"{base}/api/profiles/{LLM_PROFILE}/validate",
             key=key,
             method="POST",
-            body={"llm": LLM_DRAFT},
+            body={"llm": llm},
             timeout=120,
         ),
     )
@@ -225,7 +245,7 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             f"{base}/api/profiles/{LLM_PROFILE}",
             key=key,
             method="POST",
-            body={"llm": LLM_DRAFT, "include_secrets": True},
+            body={"llm": llm, "include_secrets": True},
         ),
     )
 
