@@ -78,7 +78,7 @@ Every graph node contains ONLY `id`, `goal`, and `depends_on`.
 }
 ```
 
-Both validation-command lists MUST contain 1..20 commands. Use only executables reported
+Both validation-command lists MUST contain 1..20 deterministic commands. Use only executables reported
 available by INTAKE. If no test suite exists, use a small deterministic non-mutating check
 with an available interpreter; never invent a nonexistent test suite.
 
