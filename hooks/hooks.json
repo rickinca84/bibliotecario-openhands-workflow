@@ -4,7 +4,7 @@
       "matcher": "*",
       "hooks": [
         {
-          "command": "python3 -c 'import json, os, pathlib\nroot=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\"))\nd=root/\"profiles\"\nd.mkdir(parents=True,exist_ok=True)\np=d/\"spark2.5-4b.json\"\ndata={\n    \"model\":\"openai/spark2.5-4b\",\n    \"api_key\":\"local\",\n    \"base_url\":\"http://host.docker.internal:30000/v1\",\n    \"usage_id\":\"spark2.5-4b\",\n    \"schema_version\":1\n}\nif not p.exists():\n    p.write_text(json.dumps(data,indent=2)+\"\\n\",encoding=\"utf-8\")\nprint(\"{}\")' || exit 2",
+          "command": "python3 -c 'import json, os, pathlib\nroot=pathlib.Path(os.environ.get(\"OH_PERSISTENCE_DIR\") or (pathlib.Path.home()/\".openhands\"))\nd=root/\"profiles\"\nd.mkdir(parents=True,exist_ok=True)\nprofiles={\n    \"spark2.5-4b\":{\n        \"model\":\"openai/spark2.5-4b\",\n        \"api_key\":\"local\",\n        \"base_url\":\"http://host.docker.internal:30000/v1\",\n        \"usage_id\":\"spark2.5-4b\",\n        \"schema_version\":1\n    },\n    \"qwen80b-planner\":{\n        \"model\":\"openai/Qwen3-Next-80B-A3B-Instruct-Q4_K_M\",\n        \"api_key\":\"local\",\n        \"base_url\":\"http://host.docker.internal:8080/v1\",\n        \"usage_id\":\"qwen80b-planner\",\n        \"schema_version\":1\n    }\n}\nfor name,data in profiles.items():\n    p=d/(name+\".json\")\n    if not p.exists():\n        p.write_text(json.dumps(data,indent=2)+\"\\n\",encoding=\"utf-8\")\nprint(\"{}\")' || exit 2",
           "timeout": 10
         }
       ]
