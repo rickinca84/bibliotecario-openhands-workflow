@@ -47,6 +47,17 @@ def tool(text):
 
 
 class TranscriptRouterTests(unittest.TestCase):
+    def test_router_key_file_is_created_private_and_reused(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "router" / "api-key.txt"
+            first = oa.load_or_create_api_key(path)
+            second = oa.load_or_create_api_key(path)
+            self.assertEqual(first, second)
+            self.assertGreaterEqual(len(first), 32)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_first_turn_bootstraps_qwen_without_rizzo(self):
         selected, state, source = tr.choose_next(
             [user("Implement CSV export")],
