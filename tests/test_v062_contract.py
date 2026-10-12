@@ -111,6 +111,15 @@ class V063ContractTests(unittest.TestCase):
         self.assertIn('"request_text":message', command)
         self.assertNotIn('low.startswith("readme")', command)
 
+    def test_planner_is_bounded_and_context_lean(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        front = text.split("---", 2)[1]
+        self.assertRegex(front, r"(?m)^max_iteration_per_run:\s*5\s*$")
+        self.assertRegex(front, r"(?m)^condenser:\s*none\s*$")
+        self.assertNotRegex(front, r"(?m)^\s*-\s*glob\s*$")
+        self.assertRegex(front, r"(?m)^\s*-\s*grep\s*$")
+        self.assertIn("issue all three `write_file` calls in the same LLM turn", text)
+
     def test_planner_anchors_to_request_text_and_requires_validation_commands(self):
         text = (ROOT / "agents" / "planner-qwen.md").read_text()
         self.assertIn("INTAKE.json.request_text", text)
