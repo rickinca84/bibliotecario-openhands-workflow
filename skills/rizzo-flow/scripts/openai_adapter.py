@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pathlib
+import secrets
 import sys
 import time
 import uuid
@@ -28,6 +29,29 @@ from transcript_router import RoutingError, choose_next
 
 MODEL_ID = os.environ.get("RIZZO_OPENAI_MODEL", "rizzo-bibliotecario-router")
 MAX_BODY_BYTES = int(os.environ.get("RIZZO_OPENAI_MAX_BODY_BYTES", str(2 * 1024 * 1024)))
+DEFAULT_KEY_FILE = pathlib.Path.home() / ".openhands" / "rizzo-router" / "api-key.txt"
+
+
+def load_or_create_api_key(path: pathlib.Path = DEFAULT_KEY_FILE) -> str:
+    """Load a local router bearer token or create one with user-only permissions."""
+    env = os.environ.get("RIZZO_ROUTER_API_KEY")
+    if env and env.strip():
+        return env.strip()
+    if path.is_file():
+        value = path.read_text(encoding="utf-8").strip()
+        if not value:
+            raise RuntimeError(f"router API key file is empty: {path}")
+        return value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = secrets.token_urlsafe(32)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(value + "\n")
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return value
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -139,7 +163,8 @@ def completion_for(payload: dict[str, Any], *, chooser=None) -> dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "RizzoOpenAIAdapter/0.1"
+    server_version = "RizzoOpenAIAdapter/0.2"
+    router_api_key: str = ""
 
     def _json(self, status: int, body: Any) -> None:
         raw = json.dumps(body, ensure_ascii=False).encode()
@@ -188,6 +213,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in {"/v1/chat/completions", "/chat/completions"}:
             self._json(HTTPStatus.NOT_FOUND, {"error": {"message": "not found"}})
             return
+        authorization = self.headers.get("Authorization") or ""
+        expected = f"Bearer {self.router_api_key}"
+        if not self.router_api_key or not secrets.compare_digest(authorization, expected):
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": {"message": "unauthorized", "type": "authentication_error"}},
+            )
+            return
         try:
             payload = self._read_json()
             if payload.get("stream") is True:
@@ -216,6 +249,7 @@ def main() -> None:
         default=int(os.environ.get("RIZZO_OPENAI_PORT", "18019")),
     )
     args = parser.parse_args()
+    Handler.router_api_key = load_or_create_api_key()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(
         json.dumps(
@@ -223,6 +257,7 @@ def main() -> None:
                 "status": "ready",
                 "model": MODEL_ID,
                 "listen": f"http://{args.host}:{args.port}",
+                "auth": "bearer-required",
             }
         ),
         flush=True,
