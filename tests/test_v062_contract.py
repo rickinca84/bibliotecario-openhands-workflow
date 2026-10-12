@@ -91,23 +91,20 @@ class V063ContractTests(unittest.TestCase):
         for artifact in ("CONTRACT.json", "WORK_GRAPH.json", "CURRENT_WORK_ITEM.json"):
             self.assertIn(artifact, text)
 
-    def test_planner_has_rizzo_mcp_only(self):
-        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
-        front = planner.split("---", 2)[1]
-
-        self.assertNotIn("skills:", front)
-        self.assertIn("mcp_config:", front)
-        self.assertIn("rizzo-flow:", front)
-        self.assertIn("url: http://127.0.0.1:18018/mcp", front)
-        self.assertIn("transport: streamable-http", front)
-        self.assertIn("decisions_v1_decisions_post", planner)
-        self.assertIn("Rizzo is advisory semantic evidence", planner)
-
-        for rel in ("agents/executor-spark.md", "agents/reviewer-qwen.md"):
+    def test_subagents_do_not_depend_on_obsolete_rizzo_mcp_bridge(self):
+        for rel in (
+            "agents/planner-qwen.md",
+            "agents/executor-spark.md",
+            "agents/reviewer-qwen.md",
+        ):
             text = (ROOT / rel).read_text()
-            other_front = text.split("---", 2)[1]
-            self.assertNotIn("mcp_config:", other_front)
+            front = text.split("---", 2)[1]
+            self.assertNotIn("mcp_config:", front)
+            self.assertNotIn("18018/mcp", text)
             self.assertNotIn("decisions_v1_decisions_post", text)
+
+        planner = (ROOT / "agents" / "planner-qwen.md").read_text()
+        self.assertIn("native/upstream/installable", planner)
 
     def test_executor_is_native_file_tools_only(self):
         text = (ROOT / "agents" / "executor-spark.md").read_text()
