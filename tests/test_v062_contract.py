@@ -106,6 +106,20 @@ class V063ContractTests(unittest.TestCase):
         planner = (ROOT / "agents" / "planner-qwen.md").read_text()
         self.assertIn("native/upstream/installable", planner)
 
+    def test_session_start_seeds_subagent_llm_profiles(self):
+        hooks = self.hooks()
+        session = hooks["session_start"][0]["hooks"][0]["command"]
+        self.assertIn('"spark2.5-4b"', session)
+        self.assertIn('"qwen80b-planner"', session)
+        self.assertIn(
+            '"http://host.docker.internal:30000/v1"',
+            session,
+        )
+        self.assertIn(
+            '"http://host.docker.internal:8080/v1"',
+            session,
+        )
+
     def test_subagent_models_are_explicit_under_rizzo_parent(self):
         planner = (ROOT / "agents" / "planner-qwen.md").read_text()
         reviewer = (ROOT / "agents" / "reviewer-qwen.md").read_text()
