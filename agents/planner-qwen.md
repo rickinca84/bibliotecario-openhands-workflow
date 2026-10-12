@@ -79,7 +79,9 @@ Every graph node contains ONLY `id`, `goal`, and `depends_on`.
 ```
 
 Both validation-command lists MUST contain 1..20 deterministic commands. Use only executables reported
-available by INTAKE. If no test suite exists, use a small deterministic non-mutating check
+available by INTAKE. Validators must return a non-zero exit code when the checked condition is false.
+For inline Python use `assert <condition>` or `raise SystemExit(0 if <condition> else 1)`;
+never use a bare boolean expression. Never compare a file with itself using `diff` or `cmp`. If no test suite exists, use a small deterministic non-mutating check
 with an available interpreter; never invent a nonexistent test suite.
 
 On later planner calls, read the authoritative artifacts and deterministic evidence,
