@@ -46,15 +46,32 @@ def _router_api_key() -> str:
     )
 
 
-def llm_draft(router_api_key: str) -> dict[str, Any]:
+def llm_draft(
+    router_api_key: str,
+    *,
+    base_url: str = "http://host.docker.internal:18019/v1",
+) -> dict[str, Any]:
+    """Build the saved runtime LLM profile.
+
+    Conversation runtimes are Docker containers, where host.docker.internal resolves
+    to the WSL/Docker host. Native profile validation, however, runs in the host-side
+    Agent Server process, so validation uses a separate localhost draft.
+    """
     return {
         "model": "openai/rizzo-bibliotecario-router",
         "api_key": router_api_key,
-        "base_url": "http://host.docker.internal:18019/v1",
+        "base_url": base_url,
         "usage_id": "rizzo-bibliotecario-router",
         "api_mode": "chat",
         "stream": False,
     }
+
+
+def validation_llm_draft(router_api_key: str) -> dict[str, Any]:
+    return llm_draft(
+        router_api_key,
+        base_url="http://127.0.0.1:18019/v1",
+    )
 
 # Explicit tool list scopes delegated agents. This is intentionally the union of
 # tools required by planner-qwen, executor-spark and reviewer-qwen plus task
@@ -192,7 +209,8 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
 
     key = _session_key()
     router_key = _router_api_key()
-    llm = llm_draft(router_key)
+    runtime_llm = llm_draft(router_key)
+    validation_llm = validation_llm_draft(router_key)
     base = base.rstrip("/")
 
     adapter = _expect_ok("Rizzo OpenAI adapter health", _request(DEFAULT_ADAPTER_HEALTH))
@@ -217,7 +235,7 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             f"{base}/api/profiles/{LLM_PROFILE}/validate",
             key=key,
             method="POST",
-            body={"llm": llm},
+            body={"llm": validation_llm},
             timeout=120,
         ),
     )
@@ -232,6 +250,8 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
         "adapter_health": adapter,
         "rizzo_health": rizzo,
         "llm_validation": llm_validation,
+        "validation_base_url": validation_llm["base_url"],
+        "runtime_base_url": runtime_llm["base_url"],
         "mode": "apply" if apply else "dry-run",
         "llm_profile": LLM_PROFILE,
         "agent_profile": AGENT_PROFILE,
@@ -251,7 +271,7 @@ def run(base: str, apply: bool, activate: bool) -> dict[str, Any]:
             f"{base}/api/profiles/{LLM_PROFILE}",
             key=key,
             method="POST",
-            body={"llm": llm, "include_secrets": True},
+            body={"llm": runtime_llm, "include_secrets": True},
         ),
     )
 
