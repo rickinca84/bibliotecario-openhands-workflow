@@ -104,6 +104,77 @@ def _probe_completion(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def streaming_chunks(completion: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert one deterministic chat completion into OpenAI SSE chunks."""
+    choice = completion["choices"][0]
+    message = choice["message"]
+    tool_calls = message.get("tool_calls") or []
+    created = completion["created"]
+    model = completion["model"]
+    completion_id = completion["id"]
+
+    chunks: list[dict[str, Any]] = [
+        {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None,
+                }
+            ],
+        }
+    ]
+    if tool_calls:
+        tc = tool_calls[0]
+        chunks.append(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": tc["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc["function"]["name"],
+                                        "arguments": tc["function"]["arguments"],
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+    chunks.append(
+        {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": choice.get("finish_reason") or "stop",
+                }
+            ],
+        }
+    )
+    return chunks
+
+
 def completion_for(payload: dict[str, Any], *, chooser=None) -> dict[str, Any]:
     messages = payload.get("messages")
     tools = payload.get("tools")
@@ -176,74 +247,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _sse(self, completion: dict[str, Any]) -> None:
         """Emit one deterministic tool decision as OpenAI chat-completion SSE."""
-        choice = completion["choices"][0]
-        message = choice["message"]
-        tool_calls = message.get("tool_calls") or []
-        created = completion["created"]
-        model = completion["model"]
-        completion_id = completion["id"]
-
-        chunks: list[dict[str, Any]] = [
-            {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"role": "assistant"},
-                        "finish_reason": None,
-                    }
-                ],
-            }
-        ]
-
-        if tool_calls:
-            tc = tool_calls[0]
-            chunks.append(
-                {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "tool_calls": [
-                                    {
-                                        "index": 0,
-                                        "id": tc["id"],
-                                        "type": "function",
-                                        "function": {
-                                            "name": tc["function"]["name"],
-                                            "arguments": tc["function"]["arguments"],
-                                        },
-                                    }
-                                ]
-                            },
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-            )
-
-        chunks.append(
-            {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": choice.get("finish_reason") or "stop",
-                    }
-                ],
-            }
-        )
+        chunks = streaming_chunks(completion)
 
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
