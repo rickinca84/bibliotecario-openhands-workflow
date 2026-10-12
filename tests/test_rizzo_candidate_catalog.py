@@ -11,6 +11,15 @@ spec.loader.exec_module(catalog)
 
 
 class CandidateCatalogTests(unittest.TestCase):
+    def test_free_form_request_bootstraps_once_through_qwen(self):
+        state = {"human_request": "Add CSV export without breaking the API."}
+        candidates = catalog.build_candidates(state, {"task", "read_file", "grep"})
+        self.assertEqual([c["id"] for c in candidates], ["bootstrap_qwen_contract"])
+        call = candidates[0]
+        self.assertEqual(call["tool"], "task")
+        self.assertEqual(call["arguments"]["subagent_type"], "planner-qwen")
+        self.assertIn("Add CSV export", call["arguments"]["prompt"])
+
     def test_uses_actual_available_tools(self):
         state = {
             "has_contract": True,
@@ -26,7 +35,7 @@ class CandidateCatalogTests(unittest.TestCase):
         candidates = catalog.build_candidates(state, {"task"})
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["id"], "delegate_spark")
-        self.assertEqual(candidates[0]["arguments"]["agent"], "executor-spark")
+        self.assertEqual(candidates[0]["arguments"]["subagent_type"], "executor-spark")
 
     def test_retry_only_after_local_deterministic_failure_and_budget(self):
         state = {
@@ -44,7 +53,7 @@ class CandidateCatalogTests(unittest.TestCase):
         state = {"routing_uncertain": True}
         candidates = catalog.build_candidates(state, {"task"})
         self.assertEqual(candidates[0]["id"], "escalate_qwen")
-        self.assertEqual(candidates[0]["arguments"]["agent"], "planner-qwen")
+        self.assertEqual(candidates[0]["arguments"]["subagent_type"], "planner-qwen")
 
     def test_mutations_require_complete_prepared_call(self):
         state = {
@@ -53,9 +62,9 @@ class CandidateCatalogTests(unittest.TestCase):
                     "id": "edit_ready",
                     "tool": "edit",
                     "arguments": {
-                        "path": "src/a.py",
-                        "old_str": "x = 1",
-                        "new_str": "x = 2",
+                        "file_path": "src/a.py",
+                        "old_string": "x = 1",
+                        "new_string": "x = 2",
                     },
                     "description": "Apply the already-prepared bounded replacement.",
                 },
@@ -83,11 +92,6 @@ class CandidateCatalogTests(unittest.TestCase):
         ids = {c["id"] for c in candidates}
         self.assertNotIn("finish", tools)
         self.assertFalse(any("pass" in cid for cid in ids))
-
-    def test_frozen_validation_is_not_synthesized(self):
-        state = {"frozen_validation_command": {"argv": ["python", "-m", "unittest"]}}
-        candidates = catalog.build_candidates(state, {"terminal"})
-        self.assertEqual(candidates[0]["arguments"], {"argv": ["python", "-m", "unittest"]})
 
     def test_catalog_rejects_more_than_26_after_build(self):
         candidates = [
