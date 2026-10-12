@@ -13,9 +13,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from rizzo_client import call
 
