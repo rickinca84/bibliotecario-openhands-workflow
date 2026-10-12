@@ -1,57 +1,65 @@
-# RizzoAgent experiment
+# RizzoAgent experiment — superseded
 
-## Architecture
+> **Status: superseded by the standard-Agent adapter path.**
+>
+> The custom Python `RizzoAgent` prototype is retained only as design history and
+> contract-test material. It is **not** the installation path for the P620.
 
-The experiment now makes Rizzo the **top-level operational selector**, not an advisory
-call inside Qwen.
+## Why it was superseded
+
+Current OpenHands plugins natively load Markdown `AgentDefinition` objects, skills,
+hooks, MCP and commands. An Agent Profile also exposes an `agent` field, but the
+current `OpenHandsAgentSettings.create_agent()` path constructs the standard
+OpenHands `Agent`; it is not a supported plugin mechanism for importing an arbitrary
+Python Agent subclass.
+
+Using a custom `RizzoAgent` would therefore require a deeper runtime extension than
+needed.
+
+## Selected architecture
+
+The supported experiment keeps the standard OpenHands Agent and replaces only its LLM
+endpoint with a local OpenAI-compatible adapter:
 
 ```text
 human request
     |
-RizzoAgent
+standard OpenHands Agent
     |
-    +-- no CONTRACT yet --> one deterministic task(planner-qwen)
-    |                       Qwen interprets free-form intent and writes contract/work item
+LLM profile: rizzo-bibliotecario-router
     |
-    +-- contract exists --> candidate catalog from real OpenHands tools + state
-                            |
-                         Rizzo choice
-                            |
-                      native ActionEvent
-                            |
-                 OpenHands normal agent loop
-                            |
-              PreToolUse / security / confirmation
-                            |
-                     native tool executor
-                            |
-                        observation
-                            |
-                       next state
+local OpenAI-compatible adapter
+    |
+    +-- deterministic transition available -> choose it directly
+    |
+    +-- >1 legal semantic actions -> Rizzo Flow closed choice
+    |
+native OpenAI tool_call: task / finish
+    |
+normal OpenHands ActionEvent / hooks / security / executor
+    |
+planner-qwen / executor-spark / reviewer-qwen
 ```
 
-## Why ActionEvent instead of execute_tool()
+The adapter does not execute tools and does not read the repository. It maps the normal
+OpenHands transcript to a bounded workflow state and returns one native tool call.
 
-OpenHands exposes `LocalConversation.execute_tool()`, but upstream explicitly documents
-that it bypasses the normal agent loop, including confirmation policies and security
-analyzer checks. Bibliotecario must not use that path.
+## Authority split
 
-RizzoAgent therefore only replaces next-action selection. It emits the same native
-`ActionEvent` shape that an ordinary model-generated tool call produces. OpenHands then
-executes it through its existing pending-action machinery.
+- **Qwen** interprets the free-form request, plans/replans, and performs final semantic review.
+- **Spark** executes one narrow `CURRENT_WORK_ITEM`.
+- **Rizzo Flow** chooses only among already-legal closed alternatives when a deterministic
+  transition is not sufficient.
+- **OpenHands native runtime** executes the selected `task` / `finish` action.
+- **Bibliotecario deterministic hooks/state** own intake, scope, budgets, tests, provenance,
+  PASS/FAIL and stop.
 
-## Authority
+Rizzo never establishes deterministic PASS.
 
-Rizzo may choose only complete calls from the deterministic catalog. It cannot invent
-tool names, file paths, commands, replacement text, or task prompts.
+## Installation
 
-Qwen owns interpretation/replanning when semantic generation is needed.
-Spark owns bounded coding work.
-Rizzo owns rapid selection among already-instantiated legal actions.
-Deterministic hooks/state own budgets, scope, validation, PASS/FAIL, and stop.
+See [p620-rizzo-parent-install.md](p620-rizzo-parent-install.md).
 
-## Promotion status
-
-This is still an experiment. It is not wired into the installed P620 profile and does
-not modify main. Static contract tests ensure the implementation does not use the
-unsafe direct-tool shortcut.
+The old `skills/rizzo-flow/scripts/rizzo_agent.py` prototype remains on this experimental
+branch for comparison until the adapter E2E is complete. It must not be wired into the
+installed Agent Canvas profile.
