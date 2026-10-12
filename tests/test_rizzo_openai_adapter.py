@@ -209,6 +209,26 @@ class TranscriptRouterTests(unittest.TestCase):
                 }
             )
 
+    def test_streaming_chunks_preserve_native_tool_call(self):
+        payload = {
+            "model": "openai/rizzo-router",
+            "messages": [user("x")],
+            "tools": TOOLS,
+        }
+        completion = oa.completion_for(
+            payload,
+            chooser=lambda *_: self.fail("single route should not call Rizzo"),
+        )
+        chunks = oa.streaming_chunks(completion)
+
+        self.assertEqual(chunks[0]["choices"][0]["delta"]["role"], "assistant")
+        tool_delta = chunks[1]["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual(tool_delta["index"], 0)
+        self.assertEqual(tool_delta["function"]["name"], "task")
+        args = json.loads(tool_delta["function"]["arguments"])
+        self.assertEqual(args["subagent_type"], "planner-qwen")
+        self.assertEqual(chunks[-1]["choices"][0]["finish_reason"], "tool_calls")
+
     def test_openai_completion_is_native_tool_call(self):
         payload = {"model": "openai/rizzo-router", "messages": [user("x")], "tools": TOOLS}
         result = oa.completion_for(
