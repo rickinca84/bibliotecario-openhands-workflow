@@ -1,11 +1,13 @@
 import importlib.util
 import pathlib
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills" / "rizzo-flow" / "scripts" / "action_router.py"
 spec = importlib.util.spec_from_file_location("action_router", SCRIPT)
 router = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = router
 assert spec.loader is not None
 spec.loader.exec_module(router)
 
