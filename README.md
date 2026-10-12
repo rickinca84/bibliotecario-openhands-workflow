@@ -119,6 +119,22 @@ are structured JSON rather than a human Markdown plan.
 
 Spark receives only `read_file`, `write_file`, and `edit`; it has no terminal.
 
+### Experimental Rizzo parent on this branch
+
+The `experiment/rizzo-action-router` branch also contains an **unmerged** top-level
+Rizzo selector experiment. It does not patch Agent Canvas or replace OpenHands' Agent.
+
+It uses a standard Agent Profile whose LLM points to a local OpenAI-compatible adapter.
+The adapter may emit only native `task` / `finish` calls. Deterministic workflow
+transitions are taken directly; Rizzo Flow is consulted only when more than one legal
+semantic action remains.
+
+The custom Python `RizzoAgent` prototype is superseded and is not the installation path.
+
+P620 setup and native `/validate` + `/materialize` preflight are documented in
+`docs/p620-rizzo-parent-install.md`. The stable installed profile must remain unchanged
+until both success-path and forced-failure E2E tests pass.
+
 ### Parent profile
 
 The parent remains orchestration-only. Because explicit OpenHands parent tool lists
