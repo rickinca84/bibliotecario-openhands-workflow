@@ -51,7 +51,9 @@ Prefer to return the exact handoff marker:
 
 EXECUTION_RESULT: READY_FOR_VALIDATION
 
-Then list changed files briefly.
+Return the marker as response text, then list changed files briefly. Never write a
+handoff file or any .agents_tmp artifact. If mutable_paths is empty, this is a
+read-only checkpoint: inspect the relevant evidence and return without edits.
 
 The parent also accepts the native OpenHands TaskObservation `status=completed` as the
 handoff to deterministic validation if this marker is omitted. Neither the marker nor

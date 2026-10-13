@@ -363,5 +363,21 @@ class ReplanIntakeRegressionTests(unittest.TestCase):
         self.assertEqual(source, "deterministic")
 
 
+class NativePromptContextRegressionTests(unittest.TestCase):
+    def test_native_appended_context_does_not_become_part_of_the_human_request(self):
+        human = "Create hello.txt with exact bytes"
+        context = ("BIBLIOTECARIO v0.6.2 ACTIVE. Deterministic INTAKE.json and STATE.json "
+                   "are ready. Intermediate PASS returns to planner.")
+        for separator in ("\n", "\n\n"):
+            with self.subTest(separator=repr(separator)):
+                selected, state, source = tr.choose_next(
+                    [user(human + separator + context)], TOOLS,
+                    chooser=lambda *_: self.fail("Bootstrap is deterministic"))
+                self.assertEqual(state["human_request"], human)
+                self.assertTrue(selected.arguments["prompt"].endswith(human))
+                self.assertNotIn("Intermediate PASS", selected.arguments["prompt"])
+                self.assertEqual(source, "deterministic")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -104,10 +104,10 @@ def _latest_user_request(messages: list[dict[str, Any]]) -> str:
             text = _content_text(message.get("content")).strip()
             if text:
                 # UserPromptSubmit may append orchestration context to the same message.
-                marker = "\n\nBIBLIOTECARIO "
-                if marker in text:
-                    text = text.split(marker, 1)[0].rstrip()
-                return text
+                return re.split(
+                    r"\n+BIBLIOTECARIO v[0-9.]+ ACTIVE\.",
+                    text, maxsplit=1,
+                )[0].rstrip()
     return ""
 
 
