@@ -1,0 +1,257 @@
+{
+  "tested_production_commit": "c3c8ed4fdac786dd6522cdbab143a7d09172cdeb",
+  "base_commit": "ce4ab6823e8996978b5d8b07ce007f5ce7810eee",
+  "suite": {
+    "command": "python3 -m unittest discover -s tests -p \"test_*.py\" -v",
+    "tests": 102,
+    "exit_code": 0,
+    "log_sha256": "38dfa28edcc6de0f7ce4d820c758f5c03e6ed76c62639f9f64af171bdcb32e41",
+    "github_actions_run": 38328646135,
+    "github_actions_conclusion": "success"
+  },
+  "positive_e2e": {
+    "conversation_id": "26864a07-8a50-44b0-99f6-27539dd6e210",
+    "execution_status": "finished",
+    "STATE": {
+      "schema_version": 2,
+      "planner_calls": 1,
+      "executor_calls": 1,
+      "reviewer_calls": 1,
+      "executor_attempts": {
+        "1882d2ffb02aae85396fa4856f1f63162d3f92687a1b995d18c77167eb82aab2": 1
+      },
+      "completed_nodes": {
+        "create_hello_txt": "be207ff356f913519b5028c0c37af24894e9c993d3453aa1ac08a1bba60ddc0d"
+      },
+      "contract_sha256": "089235665ab2e4e6d04f3e2936eab888a4d482ff4daecadcd17482ea89e9c529"
+    },
+    "VALIDATION": {
+      "schema_version": 4,
+      "generated_at_utc": "2026-10-13T00:45:20.058142+00:00",
+      "contract_sha256": "089235665ab2e4e6d04f3e2936eab888a4d482ff4daecadcd17482ea89e9c529",
+      "work_item_sha256": "1882d2ffb02aae85396fa4856f1f63162d3f92687a1b995d18c77167eb82aab2",
+      "node_id": "create_hello_txt",
+      "overall": "PASS",
+      "phase": "GLOBAL",
+      "graph_complete": true,
+      "graph_sha256": "31161b61e62a3ca371bf3d45ee5ef3ec4361623e661402f8d3d4425dce2bb6fa"
+    },
+    "REVIEW": {
+      "verdict": "APPROVED",
+      "contract_sha256": "089235665ab2e4e6d04f3e2936eab888a4d482ff4daecadcd17482ea89e9c529",
+      "graph_sha256": "31161b61e62a3ca371bf3d45ee5ef3ec4361623e661402f8d3d4425dce2bb6fa",
+      "validation_sha256": "5901392268ef6e9818fbaf5146e74ac88b0463527fe054191bdca8283174b83d",
+      "generated_at_utc": "2026-10-13T00:46:31.326934+00:00"
+    },
+    "metrics": {
+      "rizzo-bibliotecario-router": {
+        "calls": 4,
+        "prompt_tokens": 38920,
+        "completion_tokens": 366,
+        "cache_read_tokens": 0,
+        "latency_seconds": 0.23895525932312012
+      },
+      "task:task_00000001": {
+        "calls": 3,
+        "prompt_tokens": 20423,
+        "completion_tokens": 1121,
+        "cache_read_tokens": 13704,
+        "latency_seconds": 88.50770616531372
+      },
+      "task:task_00000002": {
+        "calls": 6,
+        "prompt_tokens": 41061,
+        "completion_tokens": 638,
+        "cache_read_tokens": 39569,
+        "latency_seconds": 15.75762939453125
+      },
+      "task:task_00000003": {
+        "calls": 2,
+        "prompt_tokens": 12792,
+        "completion_tokens": 490,
+        "cache_read_tokens": 5151,
+        "latency_seconds": 70.04475355148315
+      }
+    },
+    "proof": {
+      "hello_sha256": "8c079f4df580187a8c245feebb70238d477f9515cdafeb9e84f9788a607004e6",
+      "readme_sha256": "f0beec0c931d8babcaa1fdb449f406e2a2fb90abc34e1648913a463fdf5d6091",
+      "profiles_unchanged": true,
+      "native_stop_verified": true,
+      "plugin_ref": "c3c8ed4fdac786dd6522cdbab143a7d09172cdeb"
+    }
+  },
+  "positive_validation_full": {
+    "schema_version": 4,
+    "generated_at_utc": "2026-10-13T00:45:20.058142+00:00",
+    "contract_sha256": "089235665ab2e4e6d04f3e2936eab888a4d482ff4daecadcd17482ea89e9c529",
+    "work_item_sha256": "1882d2ffb02aae85396fa4856f1f63162d3f92687a1b995d18c77167eb82aab2",
+    "node_id": "create_hello_txt",
+    "scope": {
+      "status": "PASS",
+      "source_root": ".",
+      "changed_files": [
+        "hello.txt"
+      ],
+      "violations": []
+    },
+    "overall": "PASS",
+    "phase": "GLOBAL",
+    "graph_complete": true,
+    "graph_sha256": "31161b61e62a3ca371bf3d45ee5ef3ec4361623e661402f8d3d4425dce2bb6fa",
+    "work_item_commands": [
+      {
+        "argv": [
+          "python3",
+          "-c",
+          "import sys; sys.exit(0 if open('hello.txt', 'rb').read() == b'Bibliotecario Rizzo test' else 1)"
+        ],
+        "expected_exit_code": 0,
+        "exit_code": 0,
+        "timeout_seconds": 120,
+        "timed_out": false,
+        "passed": true,
+        "stdout_tail": "",
+        "stderr_tail": ""
+      }
+    ],
+    "global_commands": [
+      {
+        "argv": [
+          "python3",
+          "-c",
+          "import sys; sys.exit(0 if open('hello.txt', 'rb').read() == b'Bibliotecario Rizzo test' else 1)"
+        ],
+        "expected_exit_code": 0,
+        "exit_code": 0,
+        "timeout_seconds": 120,
+        "timed_out": false,
+        "passed": true,
+        "stdout_tail": "",
+        "stderr_tail": ""
+      },
+      {
+        "argv": [
+          "git",
+          "diff",
+          "--quiet",
+          "README.md"
+        ],
+        "expected_exit_code": 0,
+        "exit_code": 0,
+        "timeout_seconds": 120,
+        "timed_out": false,
+        "passed": true,
+        "stdout_tail": "",
+        "stderr_tail": ""
+      }
+    ]
+  },
+  "routing_replay": [
+    {
+      "action": "task",
+      "subagent": "planner-qwen",
+      "source": "deterministic"
+    },
+    {
+      "action": "task",
+      "subagent": "executor-spark",
+      "source": "deterministic"
+    },
+    {
+      "action": "task",
+      "subagent": "reviewer-qwen",
+      "source": "deterministic"
+    },
+    {
+      "action": "finish",
+      "subagent": null,
+      "source": "deterministic"
+    }
+  ],
+  "mutation_probes": {
+    "baseline": [
+      0,
+      0
+    ],
+    "wrong_hello": [
+      1,
+      0
+    ],
+    "changed_readme": [
+      0,
+      1
+    ],
+    "commands": [
+      {
+        "argv": [
+          "python3",
+          "-c",
+          "import sys; sys.exit(0 if open('hello.txt', 'rb').read() == b'Bibliotecario Rizzo test' else 1)"
+        ],
+        "expected_exit_code": 0,
+        "timeout_seconds": 120
+      },
+      {
+        "argv": [
+          "git",
+          "diff",
+          "--quiet",
+          "README.md"
+        ],
+        "expected_exit_code": 0,
+        "timeout_seconds": 120
+      }
+    ],
+    "scope": "separate copies; approved fixture unchanged"
+  },
+  "native_stop_event": {
+    "id": "05087f44-f8a5-479b-b058-035a777a4a6d",
+    "exit_code": 0,
+    "success": true,
+    "blocked": false,
+    "timestamp": "2026-10-13T00:46:31.750193"
+  },
+  "run_wall_seconds_excluding_provisioning": 178.053,
+  "global_profile_files_hashed": 7,
+  "source_readme_sha256": "ddff93f8b991c69b38480c4d5aa8954b4ff20abbf68cab12bea9feca8cb86a9f",
+  "negative_e2e": {
+    "conversation_id": "18f048b5-b564-4de3-87d4-162a883a6805",
+    "plugin_ref": "c3c8ed4fdac786dd6522cdbab143a7d09172cdeb",
+    "fault_injection": "Native per-conversation PreToolUse creates a terminal contract failure",
+    "expected_message": "BIBLIOTECARIO_FAILURE: contract: WORK_CONTRACT_INVALID after one replan: E2E injected invalid contract",
+    "execution_status": "finished",
+    "native_stop_verified": true,
+    "profiles_unchanged": true,
+    "parent_adapter_calls": 2,
+    "qwen_calls": 0,
+    "subagent_calls": 0,
+    "failure_report": {
+      "schema_version": 1,
+      "proof": "PostToolUse:finish",
+      "terminal_sha256": "ca336fffd2abca999a8632acc45b68eca6a180a9f83c36c9564ec7e6215ebaad",
+      "message": "BIBLIOTECARIO_FAILURE: contract: WORK_CONTRACT_INVALID after one replan: E2E injected invalid contract"
+    },
+    "state": {
+      "schema_version": 2,
+      "planner_calls": 0,
+      "executor_calls": 0,
+      "reviewer_calls": 0,
+      "executor_attempts": {},
+      "completed_nodes": {},
+      "contract_sha256": null
+    }
+  },
+  "prepared_graph_regression": {
+    "order": [
+      "a",
+      "b",
+      "z"
+    ],
+    "planner_calls": 1,
+    "executor_calls": 3,
+    "reviewer_calls": 1,
+    "deterministic_advances": 2,
+    "semantic_selection_calls": 0
+  }
+}
