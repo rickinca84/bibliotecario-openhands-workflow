@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -272,3 +273,31 @@ class WorkflowRegressionTests(unittest.TestCase):
         self.write_bundle()
         result = self.gate("executor-spark")
         self.assertIn("WORK_GRAPH work_items[later]", result["reason"])
+
+
+    def test_malformed_contract_reports_the_actual_json_error(self):
+        (self.wd / ".agents_tmp/CONTRACT.json").write_text(
+            '{"schema_version": 1, "broken": "unterminated}')
+        result = self.gate("executor-spark")
+        self.assertEqual(result["decision"], "deny")
+        self.assertIn("CONTRACT.json invalid JSON at line 1 column", result["reason"])
+        self.assertIn("Unterminated string", result["reason"])
+        self.assertNotIn("schema_version must be", result["reason"])
+
+    def test_planner_rejects_malformed_json_before_native_write(self):
+        text = (existing.ROOT / "agents/planner-qwen.md").read_text()
+        commands = [json.loads(m.group(1)) for m in re.finditer(
+            r'^\s*- command: (".*")$', text, re.M)]
+        self.save("PLANNER_INTAKE_READ.json", {"session_id": "repair"})
+        base = {"session_id": "repair", "tool_name": "write_file"}
+        bad = self.run_hook(commands[0], {**base, "tool_input": {
+            "file_path": ".agents_tmp/CONTRACT.json",
+            "content": '{"schema_version": 1, "broken": "unterminated}',
+        }})
+        self.assertEqual(bad["decision"], "deny")
+        self.assertIn("invalid JSON at line 1 column", bad["reason"])
+        good = self.run_hook(commands[0], {**base, "tool_input": {
+            "file_path": ".agents_tmp/CONTRACT.json",
+            "content": json.dumps(self.contract),
+        }})
+        self.assertEqual(good["decision"], "allow", good)
