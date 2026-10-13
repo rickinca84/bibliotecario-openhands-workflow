@@ -104,10 +104,10 @@ def _latest_user_request(messages: list[dict[str, Any]]) -> str:
             text = _content_text(message.get("content")).strip()
             if text:
                 # UserPromptSubmit may append orchestration context to the same message.
-                marker = "\n\nBIBLIOTECARIO "
-                if marker in text:
-                    text = text.split(marker, 1)[0].rstrip()
-                return text
+                return re.split(
+                    r"\n+BIBLIOTECARIO v[0-9.]+ ACTIVE\.",
+                    text, maxsplit=1,
+                )[0].rstrip()
     return ""
 
 
@@ -121,7 +121,7 @@ def _evidence_text(messages: list[dict[str, Any]], limit: int = 32000) -> str:
             continue
         text = _content_text(message.get("content")).strip()
         if text:
-            chunks.append(f"[{role}] {text}")
+            chunks.append(f"[{role}]\n{text}")
     return "\n".join(chunks)[-limit:]
 
 
@@ -136,13 +136,29 @@ def _extract_contract_invalid(evidence: str) -> str | None:
 
 
 def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    evidence = _evidence_text(messages)
+    # A new human request starts a new workflow. Within it, only the latest
+    # task's tool observations describe the current phase: older rejections and
+    # retry directives must not become permanent routing instructions.
+    request_start = 0
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            request_start = index + 1
+    workflow_messages = messages[request_start:]
+    phase_start = 0
+    for index, message in enumerate(workflow_messages):
+        if _assistant_task_calls([message]):
+            phase_start = index + 1
+    phase_observations = [
+        message for message in workflow_messages[phase_start:]
+        if isinstance(message, dict) and message.get("role") == "tool"
+    ]
+    evidence = _evidence_text(phase_observations)
     lower = evidence.lower()
-    calls = _assistant_task_calls(messages)
+    calls = _assistant_task_calls(workflow_messages)
     last = calls[-1] if calls else None
 
-    approved = bool(re.search(r"(?mi)^\s*APPROVED\s*$", evidence))
-    rejected = bool(re.search(r"(?mi)^\s*REJECTED\b", evidence))
+    approved = last == "reviewer-qwen" and bool(re.search(r"(?mi)^\s*APPROVED\s*$", evidence))
+    rejected = last == "reviewer-qwen" and bool(re.search(r"(?mi)^\s*REJECTED\b", evidence))
     replan_required = "REPLAN_REQUIRED" in evidence
 
     retry_executor = any(
@@ -170,6 +186,11 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         )
     )
     contract_invalid = _extract_contract_invalid(evidence)
+    pending_match = re.findall(r"WORK_ITEM_REPLAN_REQUIRED:[^\r\n]+", evidence)
+    retry_match = (
+        re.search(r"(?m)^PLANNER_RETRY_REQUIRED: (task_[0-9]+)\b", evidence)
+        if last == "planner-qwen" else None
+    )
 
     last_task_completed = False
     if last:
@@ -192,7 +213,10 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "retry_executor": retry_executor,
         "planner_directive": planner_directive,
         "reviewer_allowed": reviewer_allowed,
+        "next_work_item_ready": "NEXT_WORK_ITEM_READY:" in evidence,
         "contract_invalid": contract_invalid,
+        "pending_work_item": pending_match[-1].strip() if pending_match else None,
+        "planner_retry_id": retry_match.group(1) if retry_match else None,
         "failure_message": _extract_failure_message(evidence),
         "evidence_tail": evidence[-6000:],
     }
@@ -251,14 +275,55 @@ def deterministic_candidates(
     human = str(state.get("human_request") or "").strip()
     last = state.get("last_subagent")
 
+    if state.get("planner_retry_id"):
+        return [
+            RouteCandidate(
+                id="retry_planner_after_iteration_limit",
+                tool="task",
+                arguments={
+                    "subagent_type": "planner-qwen",
+                    "prompt": (
+                        "Start one fresh bounded planner task after MaxIterationsReached. "
+                        "FIRST read .agents_tmp/INTAKE.json, then continue from the "
+                        "existing evidence and any partial planning artifacts. "
+                        "Complete the three authoritative JSON artifacts and return "
+                        "PLANNING_RESULT: READY, or report the exact blocker with "
+                        "PLANNING_RESULT: BLOCKED. Do not claim validation PASS."
+                    ),
+                },
+                description="Retry Qwen planning once with a fresh bounded task after its iteration limit.",
+            )
+        ]
+
+    if state.get("pending_work_item"):
+        return [
+            _task(
+                "planner-qwen",
+                (
+                    "FIRST read .agents_tmp/INTAKE.json. Then inspect VALIDATION.json, "
+                    "STATE.json, WORK_GRAPH.json, and CURRENT_WORK_ITEM.json. "
+                    "The work item failed twice under deterministic validation. "
+                    "Keep the failed node pending and incomplete. Choose a different "
+                    "dependency-ready independent node only if it is within the "
+                    "authorized checkpoint; otherwise revise the failed work item "
+                    "using the actual failure evidence or report a precise blocker. "
+                    "Never mark an unchecked node complete. Exact directive:\n\n"
+                    + str(state["pending_work_item"])
+                ),
+                "Replan after two deterministic failures without claiming PASS.",
+            )
+        ]
+
     if state.get("contract_invalid"):
         return [
             _task(
                 "planner-qwen",
                 (
-                    "The deterministic preflight rejected the current planning artifacts. "
-                    "Correct the existing CONTRACT.json / WORK_GRAPH.json / CURRENT_WORK_ITEM.json "
-                    "without changing the human objective. Exact rejection:\n\n"
+                    "FIRST read .agents_tmp/INTAKE.json. Then read the required existing "
+                    "JSON artifacts together in one turn. The deterministic preflight "
+                    "rejected the current planning artifacts. Correct the existing CONTRACT.json / WORK_GRAPH.json / CURRENT_WORK_ITEM.json "
+                    "without changing the human objective. Write only the necessary corrections "
+                    "together, then return PLANNING_RESULT: READY. Exact rejection:\n\n"
                     + str(state["contract_invalid"])
                 ),
                 "Repair an invalid planning contract using the exact deterministic rejection.",
@@ -280,6 +345,19 @@ def deterministic_candidates(
             )
         ]
 
+    if state.get("next_work_item_ready"):
+        return [
+            _task(
+                "executor-spark",
+                (
+                    "Execute the dependency-ready CURRENT_WORK_ITEM.json selected and "
+                    "validated by the deterministic parent hook. Read CONTRACT.json and "
+                    "CURRENT_WORK_ITEM.json first; preserve the bounded scope."
+                ),
+                "Execute the prepared dependency-ready node without another planner call.",
+            )
+        ]
+
     if state.get("retry_executor"):
         return [
             _task(
@@ -298,6 +376,7 @@ def deterministic_candidates(
             _task(
                 "planner-qwen",
                 (
+                    "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                     "Replan from the authoritative Bibliotecario artifacts and latest "
                     "deterministic/reviewer evidence. Preserve CONTRACT.json and completed "
                     "nodes; modify only future graph work as permitted."
@@ -360,6 +439,7 @@ def deterministic_candidates(
             _task(
                 "planner-qwen",
                 (
+                    "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                     "Inspect the latest workflow/reviewer evidence and decide whether a bounded "
                     "corrective node is required. Preserve locked contract and completed nodes."
                 ),
@@ -371,6 +451,7 @@ def deterministic_candidates(
         _task(
             "planner-qwen",
             (
+                "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                 "Recover the Bibliotecario workflow from the authoritative artifacts and "
                 "latest transcript evidence. Preserve the locked contract and completed nodes."
             ),

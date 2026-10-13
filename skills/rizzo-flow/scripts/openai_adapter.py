@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import secrets
 import sys
 import time
@@ -84,6 +85,66 @@ def is_native_validation_probe(payload: dict[str, Any]) -> bool:
         and user.get("role") == "user"
         and _message_text(user).strip() == "ping"
     )
+
+
+def _title_fallback(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Handle OpenHands SDK's no-tools title request without invoking the router."""
+    messages = payload.get("messages")
+    if (
+        payload.get("tools") not in (None, [])
+        or not isinstance(messages, list)
+        or len(messages) != 2
+    ):
+        return None
+    system, user = messages
+    if not isinstance(system, dict) or not isinstance(user, dict):
+        return None
+    if system.get("role") != "system" or user.get("role") != "user":
+        return None
+    system_text = _message_text(system)
+    if (
+        "You are a helpful assistant that generates concise, descriptive titles "
+        "for conversations with OpenHands." not in system_text
+    ):
+        return None
+
+    user_text = _message_text(user)
+    match = re.match(
+        r"Generate a title \(maximum (\d+) characters\) for a conversation "
+        r"that starts with this message:\s*\n\n",
+        user_text,
+    )
+    suffix = "Also make sure to include ONE most relevant emoji at the start of the title."
+    if match is None or suffix not in user_text[match.end() :]:
+        return None
+
+    max_length = max(1, min(int(match.group(1)), 1000))
+    request = user_text[match.end() :].split(suffix, 1)[0].rstrip()
+    # The SDK uses first-message truncation when title generation fails. Mirror
+    # that deterministic fallback so no semantic route or tool-less completion
+    # is fabricated for a real agent turn.
+    title = request.removesuffix(".").strip()
+    if len(title) > max_length:
+        if max_length >= 3:
+            title = title[: max_length - 3].rstrip() + "..."
+        else:
+            title = title[:max_length]
+
+    return {
+        "id": "chatcmpl-rizzo-title-" + uuid.uuid4().hex,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": payload.get("model") or MODEL_ID,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": title},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "x_rizzo": {"route_source": "openhands_conversation_title_fallback"},
+    }
 
 
 def _probe_completion(payload: dict[str, Any]) -> dict[str, Any]:
@@ -182,6 +243,9 @@ def completion_for(payload: dict[str, Any], *, chooser=None) -> dict[str, Any]:
         raise RoutingError("messages must be a list")
     if is_native_validation_probe(payload):
         return _probe_completion(payload)
+    title_fallback = _title_fallback(payload)
+    if title_fallback is not None:
+        return title_fallback
     if not isinstance(tools, list) or not tools:
         raise RoutingError(
             "real router turns require native OpenHands tools; refusing tool-less completion"

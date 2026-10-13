@@ -69,6 +69,42 @@ class TranscriptRouterTests(unittest.TestCase):
         self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
         self.assertIn("Implement CSV export", selected.arguments["prompt"])
 
+    def test_two_local_failures_escalate_with_exact_pending_node(self):
+        selected, state, source = tr.choose_next(
+            [
+                user("Build a Luanti island"),
+                assistant_task("executor-spark"),
+                tool("WORK_ITEM_REPLAN_REQUIRED: node island failed after "
+                     "2 deterministic attempts\nCall planner-qwen."),
+            ],
+            TOOLS,
+            chooser=lambda *_: self.fail("pending replan must be deterministic"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertIn("node island", selected.arguments["prompt"])
+        self.assertIn("independent node", selected.arguments["prompt"])
+        self.assertEqual(state["pending_work_item"],
+                         "WORK_ITEM_REPLAN_REQUIRED: node island failed after "
+                         "2 deterministic attempts")
+
+    def test_iteration_limit_retries_planner_deterministically(self):
+        messages = [
+            user("Build a Luanti island"),
+            assistant_task("planner-qwen"),
+            tool("Task ID: task_00000001\nSubagent: planner-qwen\n"
+                 "Status: error\nAgent reached maximum iterations limit (12).\n"
+                 "PLANNER_RETRY_REQUIRED: task_00000001"),
+        ]
+        selected, state, source = tr.choose_next(
+            messages, TOOLS,
+            chooser=lambda *_: self.fail("bounded planner retry must not call Rizzo"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertNotIn("resume", selected.arguments)
+        self.assertEqual(state["planner_retry_id"], "task_00000001")
+
     def test_planner_then_spark(self):
         messages = [
             user("Implement CSV export"),
@@ -220,6 +256,40 @@ class TranscriptRouterTests(unittest.TestCase):
             "openhands_profile_validation_probe",
         )
 
+    def test_openhands_conversation_title_without_tools_uses_deterministic_fallback(self):
+        payload = {
+            "model": "openai/rizzo-router",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant that generates concise, descriptive "
+                        "titles for conversations with OpenHands. Return only the title."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Generate a title (maximum 18 characters) for a conversation "
+                        "that starts with this message:\n\nBuild a Luanti island. "
+                        "Also make sure to include ONE most relevant emoji at the start "
+                        "of the title."
+                    ),
+                },
+            ],
+            "max_tokens": 60,
+        }
+
+        result = oa.completion_for(payload)
+
+        choice = result["choices"][0]
+        self.assertEqual(choice["finish_reason"], "stop")
+        self.assertEqual(choice["message"]["content"], "Build a Luanti...")
+        self.assertEqual(
+            result["x_rizzo"]["route_source"],
+            "openhands_conversation_title_fallback",
+        )
+
     def test_arbitrary_tool_less_completion_fails_closed(self):
         with self.assertRaises(tr.RoutingError):
             oa.completion_for(
@@ -262,6 +332,121 @@ class TranscriptRouterTests(unittest.TestCase):
         self.assertEqual(call["function"]["name"], "task")
         args = json.loads(call["function"]["arguments"])
         self.assertEqual(args["subagent_type"], "planner-qwen")
+
+
+
+class TranscriptEpochRegressionTests(unittest.TestCase):
+    def route(self, messages):
+        return tr.choose_next(messages, TOOLS,
+            chooser=lambda *_: self.fail("deterministic phase must not invoke Rizzo"))[0]
+
+    def test_repaired_contract_does_not_replan_again_from_stale_rejection(self):
+        messages = [
+            user("Create hello.txt"),
+            assistant_task("planner-qwen"), tool("PLANNING_RESULT: READY"),
+            assistant_task("executor-spark"),
+            tool("WORK_CONTRACT_INVALID before executor: invalid validator"),
+            assistant_task("planner-qwen"), tool("PLANNING_RESULT: READY"),
+        ]
+        self.assertEqual(self.route(messages).arguments["subagent_type"], "executor-spark")
+
+    def test_successful_retry_discards_old_local_failure_directive(self):
+        messages = [
+            user("Create hello.txt"),
+            assistant_task("executor-spark"),
+            tool("authoritative WORK_ITEM validation FAIL. SAME CURRENT_WORK_ITEM"),
+            assistant_task("executor-spark"), tool("Status: completed"),
+        ]
+        self.assertEqual(self.route(messages).arguments["subagent_type"], "reviewer-qwen")
+
+    def test_replanned_review_discards_old_rejected_verdict(self):
+        messages = [
+            user("Create hello.txt"),
+            assistant_task("reviewer-qwen"), tool("Status: completed\nREJECTED"),
+            assistant_task("planner-qwen"), tool("PLANNING_RESULT: READY"),
+        ]
+        self.assertEqual(self.route(messages).arguments["subagent_type"], "executor-spark")
+
+    def test_human_approval_text_is_not_a_review_verdict(self):
+        self.assertEqual(self.route([user("Create a file containing:\nAPPROVED")])
+                         .arguments["subagent_type"], "planner-qwen")
+
+    def test_new_human_request_does_not_reuse_previous_approval(self):
+        messages = [
+            user("old request"), assistant_task("reviewer-qwen"),
+            tool("Status: completed\nAPPROVED"), user("new request"),
+        ]
+        self.assertEqual(self.route(messages).arguments["subagent_type"], "planner-qwen")
+
+
+class PreparedNodeRoutingTests(unittest.TestCase):
+    def test_prepared_node_after_denied_reviewer_routes_directly_to_spark(self):
+        messages = [
+            user("Perform three bounded checkpoints"),
+            assistant_task("planner-qwen"), tool("PLANNING_RESULT: READY"),
+            assistant_task("executor-spark"), tool("EXECUTION_RESULT: READY_FOR_VALIDATION"),
+            assistant_task("reviewer-qwen"),
+            tool("Tool denied. NEXT_WORK_ITEM_READY: b"),
+        ]
+        selected, state, source = tr.choose_next(
+            messages, TOOLS,
+            chooser=lambda *_: self.fail("No semantic decision is needed"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertTrue(state["next_work_item_ready"])
+        self.assertEqual(selected.arguments["subagent_type"], "executor-spark")
+
+    def test_prepared_directive_does_not_survive_the_next_execution(self):
+        messages = [
+            user("Perform checkpoints"),
+            assistant_task("reviewer-qwen"), tool("NEXT_WORK_ITEM_READY: b"),
+            assistant_task("executor-spark"), tool("EXECUTION_RESULT: READY_FOR_VALIDATION"),
+        ]
+        selected, _, source = tr.choose_next(
+            messages, TOOLS, chooser=lambda *_: self.fail("Must remain deterministic"))
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "reviewer-qwen")
+
+
+class VerdictAuthorityTests(unittest.TestCase):
+    def test_executor_cannot_supply_final_semantic_verdict(self):
+        messages = [user("Create hello"), assistant_task("executor-spark"),
+                    tool("APPROVED\nEXECUTION_RESULT: READY_FOR_VALIDATION")]
+        selected, state, source = tr.choose_next(
+            messages, TOOLS, chooser=lambda *_: self.fail("Must use the review gate"))
+        self.assertFalse(state["approved"])
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "reviewer-qwen")
+
+
+class ReplanIntakeRegressionTests(unittest.TestCase):
+    def test_contract_repair_obeys_first_read_and_preserves_exact_error(self):
+        exact = "WORK_CONTRACT_INVALID before executor: WORK_GRAPH work_items[later]: bad scope"
+        messages = [user("Create hello"), assistant_task("executor-spark"), tool(exact)]
+        selected, _, source = tr.choose_next(
+            messages, TOOLS, chooser=lambda *_: self.fail("Repair is deterministic"))
+        prompt = selected.arguments["prompt"]
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertTrue(prompt.startswith("FIRST read .agents_tmp/INTAKE.json."))
+        self.assertIn("together in one turn", prompt)
+        self.assertIn(exact, prompt)
+        self.assertEqual(source, "deterministic")
+
+
+class NativePromptContextRegressionTests(unittest.TestCase):
+    def test_native_appended_context_does_not_become_part_of_the_human_request(self):
+        human = "Create hello.txt with exact bytes"
+        context = ("BIBLIOTECARIO v0.6.2 ACTIVE. Deterministic INTAKE.json and STATE.json "
+                   "are ready. Intermediate PASS returns to planner.")
+        for separator in ("\n", "\n\n"):
+            with self.subTest(separator=repr(separator)):
+                selected, state, source = tr.choose_next(
+                    [user(human + separator + context)], TOOLS,
+                    chooser=lambda *_: self.fail("Bootstrap is deterministic"))
+                self.assertEqual(state["human_request"], human)
+                self.assertTrue(selected.arguments["prompt"].endswith(human))
+                self.assertNotIn("Intermediate PASS", selected.arguments["prompt"])
+                self.assertEqual(source, "deterministic")
 
 
 if __name__ == "__main__":

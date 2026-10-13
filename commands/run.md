@@ -23,7 +23,9 @@ review, switch LLMs, or substitute another agent.
 7. Its parent PreToolUse first runs deterministic scope and work-item validation.
 8. WORK_ITEM FAIL -> reviewer is denied; call executor-spark again under the same work item.
 9. WORK_ITEM PASS with graph incomplete -> node is deterministically completed; reviewer
-   is denied; call planner-qwen for the next dependency-ready node.
+   is denied. On NEXT_WORK_ITEM_READY, call executor-spark directly for the prepared
+   dependency-ready node selected deterministically. Call planner-qwen only when
+   no fully specified prepared item is available.
 10. Graph complete -> immutable CONTRACT final_validation_commands run.
 11. GLOBAL FAIL -> completed history is preserved; reviewer is denied; call planner-qwen
     to add a bounded corrective node.
