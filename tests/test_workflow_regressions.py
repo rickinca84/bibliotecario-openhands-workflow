@@ -96,6 +96,155 @@ class WorkflowRegressionTests(unittest.TestCase):
         return self.run_hook(self.helper.task_hooks()[1]["command"],
                              {"tool_input": {"subagent_type": "reviewer-qwen"}})
 
+    def test_intake_records_actual_luanti_and_package_probes(self):
+        executables = self.load("INTAKE.json")["environment"]["executables"]
+        for name in ("luanti", "minetest", "cmake", "make", "gcc", "apt-get"):
+            self.assertIn(name, executables)
+        self.assertTrue(all(value is None or isinstance(value, str)
+                            for value in executables.values()))
+
+    def planner_iteration_error(self):
+        command = self.hooks["post_tool_use"][0]["hooks"][0]["command"]
+        return self.run_hook(command, {
+            "tool_input": {"subagent_type": "planner-qwen"},
+            "tool_response": {
+                "status": "error", "is_error": True,
+                "task_id": "task_00000001",
+                "content": [{"type": "text",
+                             "text": "Agent reached maximum iterations limit (12)."}],
+            },
+        })
+
+    def test_planner_iteration_limit_retries_fresh_bounded_task_once(self):
+        first = self.planner_iteration_error()
+        self.assertIn("PLANNER_RETRY_REQUIRED: task_00000001",
+                      first["additionalContext"])
+        duplicate = self.planner_iteration_error()
+        self.assertIn("PLANNER_RETRY_REQUIRED: task_00000001",
+                      duplicate["additionalContext"])
+        self.assertFalse((self.wd / ".agents_tmp/TERMINAL_FAILURE.json").exists())
+        command = self.helper.task_hooks()[0]["command"]
+        refused = self.run_hook(command, {"tool_input": {
+            "subagent_type": "planner-qwen", "resume": "task_00000001"}})
+        self.assertEqual(refused["decision"], "deny")
+        allowed = self.gate("planner-qwen")
+        self.assertEqual(allowed["decision"], "allow")
+        self.assertEqual(self.load("STATE.json")["planner_calls"], 2)
+        self.assertEqual(self.gate("planner-qwen")["decision"], "deny")
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        self.assertFalse((self.wd / ".agents_tmp/PLANNER_RETRY.json").exists())
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+
+    def test_second_planner_iteration_limit_is_precise_terminal_failure(self):
+        self.planner_iteration_error()
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        command = self.hooks["post_tool_use"][0]["hooks"][0]["command"]
+        self.run_hook(command, {
+            "tool_input": {"subagent_type": "planner-qwen"},
+            "tool_response": {
+                "status": "error", "is_error": True,
+                "task_id": "task_00000002",
+                "content": [{"type": "text",
+                             "text": "Agent reached maximum iterations limit (12)."}],
+            },
+        })
+        terminal = self.load("TERMINAL_FAILURE.json")
+        self.assertEqual(terminal["reason"],
+                         "MaxIterationsReached after one bounded planner retry")
+        self.assertEqual(self.gate("executor-spark")["decision"], "deny")
+
+    def fail_work_item_twice(self):
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        (self.wd / "hello.txt").write_bytes(b"wrong")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        first = self.validate()
+        self.assertEqual(first["decision"], "deny")
+        self.assertEqual(self.load("VALIDATION.json")["overall"], "FAIL")
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        second = self.validate()
+        self.assertIn("WORK_ITEM_REPLAN_REQUIRED: node a", second["reason"])
+        return second
+
+    def test_failed_work_item_can_defer_only_to_independent_node(self):
+        self.fail_work_item_twice()
+        pending = self.load("STATE.json")["pending_checks"]
+        self.assertIn("a", pending)
+        self.assertFalse(pending["a"]["escalated"])
+        self.assertEqual(self.gate("executor-spark")["decision"], "deny")
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.assertTrue(self.load("STATE.json")["pending_checks"]["a"]["escalated"])
+
+        self.graph["nodes"].append({"id": "b", "goal": "independent",
+                                    "depends_on": []})
+        self.graph["current_node_id"] = "b"
+        second_item = copy.deepcopy(self.work)
+        second_item.update(
+            node_id="b", goal="independent", mutable_paths=["later.txt"],
+            validation_commands=[{
+                "argv": ["python3", "-c",
+                         "from pathlib import Path; "
+                         "assert Path('later.txt').read_bytes() == b'ready'"],
+                "expected_exit_code": 0, "timeout_seconds": 10,
+            }],
+        )
+        self.save("WORK_GRAPH.json", self.graph)
+        self.save("CURRENT_WORK_ITEM.json", second_item)
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        (self.wd / "later.txt").write_bytes(b"ready")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        result = self.validate()
+        self.assertEqual(result["decision"], "deny")
+        self.assertEqual(self.load("VALIDATION.json")["overall"], "PASS")
+        self.assertFalse(self.load("VALIDATION.json")["graph_complete"])
+        self.assertEqual(set(self.load("STATE.json")["completed_nodes"]), {"b"})
+        self.assertIn("a", self.load("STATE.json")["pending_checks"])
+        self.assertFalse((self.wd / ".agents_tmp/REVIEW.json").exists())
+
+    def test_missing_validator_is_pending_and_never_passes(self):
+        self.work["validation_commands"] = [{
+            "argv": ["bibliotecario-nonexistent-luanti-test-binary", "--server"],
+            "expected_exit_code": 0, "timeout_seconds": 10,
+        }]
+        self.write_bundle()
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        (self.wd / "hello.txt").write_bytes(b"Bibliotecario Rizzo test")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        result = self.validate()
+        self.assertIn("WORK_ITEM_REPLAN_REQUIRED: node a", result["reason"])
+        validation = self.load("VALIDATION.json")
+        self.assertEqual(validation["overall"], "ENVIRONMENT_ERROR")
+        self.assertFalse(validation["graph_complete"])
+        self.assertEqual(self.load("STATE.json")["completed_nodes"], {})
+        self.assertIn("a", self.load("STATE.json")["pending_checks"])
+        self.assertFalse((self.wd / ".agents_tmp/TERMINAL_FAILURE.json").exists())
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+
+    def test_pending_node_does_not_unlock_dependent_milestone(self):
+        self.fail_work_item_twice()
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.graph["nodes"].append({"id": "b", "goal": "depends on a",
+                                    "depends_on": ["a"]})
+        self.graph["current_node_id"] = "b"
+        second_item = copy.deepcopy(self.work)
+        second_item.update(node_id="b", goal="depends on a")
+        self.save("WORK_GRAPH.json", self.graph)
+        self.save("CURRENT_WORK_ITEM.json", second_item)
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        denied = self.gate("executor-spark")
+        self.assertEqual(denied["decision"], "deny")
+        self.assertIn("current node has incomplete dependencies", denied["reason"])
+        self.assertEqual(self.load("STATE.json")["completed_nodes"], {})
+
+    def test_planner_cannot_repeat_identical_failed_work_item(self):
+        self.fail_work_item_twice()
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        denied = self.gate("executor-spark")
+        self.assertEqual(denied["decision"], "deny")
+        self.assertIn("same failed work item", self.load("TERMINAL_FAILURE.json")["reason"])
+
     def test_invalid_contract_allows_only_one_replan_and_keeps_exact_reason(self):
         self.contract["final_validation_commands"] = []
         self.write_bundle()

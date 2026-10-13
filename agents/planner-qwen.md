@@ -109,6 +109,12 @@ After intake, batch the required artifact reads together in one LLM turn, then b
 necessary writes together. On later calls, read the authoritative artifacts and deterministic evidence,
 preserve locked CONTRACT.json and completed graph nodes, and change only future work.
 After validation failure or reviewer rejection, add only a bounded corrective node.
+After two failed validations of the same work item, read STATE.json pending_checks
+and VALIDATION.json. Keep the failed node incomplete. You may select a different
+dependency-ready node within the currently authorized checkpoint only if it is
+independent of the failed node and safe to execute; otherwise revise the failed
+work item using the observed failure. Do not implement future roadmap milestones
+that the human has not authorized. A pending check cannot become GLOBAL PASS.
 
 If the request cannot be represented safely, return exactly:
 `PLANNING_RESULT: BLOCKED`

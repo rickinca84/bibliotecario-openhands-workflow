@@ -111,6 +111,11 @@ class V063ContractTests(unittest.TestCase):
         command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
         self.assertIn('probe_names=["git","python","python3"', command)
 
+    def test_intake_reports_luanti_and_installability_evidence(self):
+        command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
+        for name in ("luanti", "minetest", "cmake", "make", "gcc", "apt-get"):
+            self.assertIn(f'"{name}"', command)
+
     def test_intake_preserves_request_and_does_not_treat_readme_as_instruction(self):
         command = self.hooks()["user_prompt_submit"][0]["hooks"][0]["command"]
         self.assertIn('"request_text":message', command)

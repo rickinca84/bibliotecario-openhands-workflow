@@ -186,6 +186,11 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         )
     )
     contract_invalid = _extract_contract_invalid(evidence)
+    pending_match = re.findall(r"WORK_ITEM_REPLAN_REQUIRED:[^\r\n]+", evidence)
+    retry_match = (
+        re.search(r"(?m)^PLANNER_RETRY_REQUIRED: (task_[0-9]+)\b", evidence)
+        if last == "planner-qwen" else None
+    )
 
     last_task_completed = False
     if last:
@@ -210,6 +215,8 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "reviewer_allowed": reviewer_allowed,
         "next_work_item_ready": "NEXT_WORK_ITEM_READY:" in evidence,
         "contract_invalid": contract_invalid,
+        "pending_work_item": pending_match[-1].strip() if pending_match else None,
+        "planner_retry_id": retry_match.group(1) if retry_match else None,
         "failure_message": _extract_failure_message(evidence),
         "evidence_tail": evidence[-6000:],
     }
@@ -267,6 +274,45 @@ def deterministic_candidates(
 
     human = str(state.get("human_request") or "").strip()
     last = state.get("last_subagent")
+
+    if state.get("planner_retry_id"):
+        return [
+            RouteCandidate(
+                id="retry_planner_after_iteration_limit",
+                tool="task",
+                arguments={
+                    "subagent_type": "planner-qwen",
+                    "prompt": (
+                        "Start one fresh bounded planner task after MaxIterationsReached. "
+                        "FIRST read .agents_tmp/INTAKE.json, then continue from the "
+                        "existing evidence and any partial planning artifacts. "
+                        "Complete the three authoritative JSON artifacts and return "
+                        "PLANNING_RESULT: READY, or report the exact blocker with "
+                        "PLANNING_RESULT: BLOCKED. Do not claim validation PASS."
+                    ),
+                },
+                description="Retry Qwen planning once with a fresh bounded task after its iteration limit.",
+            )
+        ]
+
+    if state.get("pending_work_item"):
+        return [
+            _task(
+                "planner-qwen",
+                (
+                    "FIRST read .agents_tmp/INTAKE.json. Then inspect VALIDATION.json, "
+                    "STATE.json, WORK_GRAPH.json, and CURRENT_WORK_ITEM.json. "
+                    "The work item failed twice under deterministic validation. "
+                    "Keep the failed node pending and incomplete. Choose a different "
+                    "dependency-ready independent node only if it is within the "
+                    "authorized checkpoint; otherwise revise the failed work item "
+                    "using the actual failure evidence or report a precise blocker. "
+                    "Never mark an unchecked node complete. Exact directive:\n\n"
+                    + str(state["pending_work_item"])
+                ),
+                "Replan after two deterministic failures without claiming PASS.",
+            )
+        ]
 
     if state.get("contract_invalid"):
         return [

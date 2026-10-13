@@ -69,6 +69,42 @@ class TranscriptRouterTests(unittest.TestCase):
         self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
         self.assertIn("Implement CSV export", selected.arguments["prompt"])
 
+    def test_two_local_failures_escalate_with_exact_pending_node(self):
+        selected, state, source = tr.choose_next(
+            [
+                user("Build a Luanti island"),
+                assistant_task("executor-spark"),
+                tool("WORK_ITEM_REPLAN_REQUIRED: node island failed after "
+                     "2 deterministic attempts\nCall planner-qwen."),
+            ],
+            TOOLS,
+            chooser=lambda *_: self.fail("pending replan must be deterministic"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertIn("node island", selected.arguments["prompt"])
+        self.assertIn("independent node", selected.arguments["prompt"])
+        self.assertEqual(state["pending_work_item"],
+                         "WORK_ITEM_REPLAN_REQUIRED: node island failed after "
+                         "2 deterministic attempts")
+
+    def test_iteration_limit_retries_planner_deterministically(self):
+        messages = [
+            user("Build a Luanti island"),
+            assistant_task("planner-qwen"),
+            tool("Task ID: task_00000001\nSubagent: planner-qwen\n"
+                 "Status: error\nAgent reached maximum iterations limit (12).\n"
+                 "PLANNER_RETRY_REQUIRED: task_00000001"),
+        ]
+        selected, state, source = tr.choose_next(
+            messages, TOOLS,
+            chooser=lambda *_: self.fail("bounded planner retry must not call Rizzo"),
+        )
+        self.assertEqual(source, "deterministic")
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertNotIn("resume", selected.arguments)
+        self.assertEqual(state["planner_retry_id"], "task_00000001")
+
     def test_planner_then_spark(self):
         messages = [
             user("Implement CSV export"),
