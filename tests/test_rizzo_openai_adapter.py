@@ -220,6 +220,40 @@ class TranscriptRouterTests(unittest.TestCase):
             "openhands_profile_validation_probe",
         )
 
+    def test_openhands_conversation_title_without_tools_uses_deterministic_fallback(self):
+        payload = {
+            "model": "openai/rizzo-router",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant that generates concise, descriptive "
+                        "titles for conversations with OpenHands. Return only the title."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Generate a title (maximum 18 characters) for a conversation "
+                        "that starts with this message:\n\nBuild a Luanti island. "
+                        "Also make sure to include ONE most relevant emoji at the start "
+                        "of the title."
+                    ),
+                },
+            ],
+            "max_tokens": 60,
+        }
+
+        result = oa.completion_for(payload)
+
+        choice = result["choices"][0]
+        self.assertEqual(choice["finish_reason"], "stop")
+        self.assertEqual(choice["message"]["content"], "Build a Luanti...")
+        self.assertEqual(
+            result["x_rizzo"]["route_source"],
+            "openhands_conversation_title_fallback",
+        )
+
     def test_arbitrary_tool_less_completion_fails_closed(self):
         with self.assertRaises(tr.RoutingError):
             oa.completion_for(
