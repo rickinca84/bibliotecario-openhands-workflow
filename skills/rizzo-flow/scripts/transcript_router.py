@@ -273,9 +273,11 @@ def deterministic_candidates(
             _task(
                 "planner-qwen",
                 (
-                    "The deterministic preflight rejected the current planning artifacts. "
-                    "Correct the existing CONTRACT.json / WORK_GRAPH.json / CURRENT_WORK_ITEM.json "
-                    "without changing the human objective. Exact rejection:\n\n"
+                    "FIRST read .agents_tmp/INTAKE.json. Then read the required existing "
+                    "JSON artifacts together in one turn. The deterministic preflight "
+                    "rejected the current planning artifacts. Correct the existing CONTRACT.json / WORK_GRAPH.json / CURRENT_WORK_ITEM.json "
+                    "without changing the human objective. Write only the necessary corrections "
+                    "together, then return PLANNING_RESULT: READY. Exact rejection:\n\n"
                     + str(state["contract_invalid"])
                 ),
                 "Repair an invalid planning contract using the exact deterministic rejection.",
@@ -328,6 +330,7 @@ def deterministic_candidates(
             _task(
                 "planner-qwen",
                 (
+                    "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                     "Replan from the authoritative Bibliotecario artifacts and latest "
                     "deterministic/reviewer evidence. Preserve CONTRACT.json and completed "
                     "nodes; modify only future graph work as permitted."
@@ -390,6 +393,7 @@ def deterministic_candidates(
             _task(
                 "planner-qwen",
                 (
+                    "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                     "Inspect the latest workflow/reviewer evidence and decide whether a bounded "
                     "corrective node is required. Preserve locked contract and completed nodes."
                 ),
@@ -401,6 +405,7 @@ def deterministic_candidates(
         _task(
             "planner-qwen",
             (
+                "FIRST read .agents_tmp/INTAKE.json. Batch subsequent artifact reads. "
                 "Recover the Bibliotecario workflow from the authoritative artifacts and "
                 "latest transcript evidence. Preserve the locked contract and completed nodes."
             ),

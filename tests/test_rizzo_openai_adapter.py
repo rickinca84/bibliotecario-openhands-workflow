@@ -349,5 +349,19 @@ class VerdictAuthorityTests(unittest.TestCase):
         self.assertEqual(selected.arguments["subagent_type"], "reviewer-qwen")
 
 
+class ReplanIntakeRegressionTests(unittest.TestCase):
+    def test_contract_repair_obeys_first_read_and_preserves_exact_error(self):
+        exact = "WORK_CONTRACT_INVALID before executor: WORK_GRAPH work_items[later]: bad scope"
+        messages = [user("Create hello"), assistant_task("executor-spark"), tool(exact)]
+        selected, _, source = tr.choose_next(
+            messages, TOOLS, chooser=lambda *_: self.fail("Repair is deterministic"))
+        prompt = selected.arguments["prompt"]
+        self.assertEqual(selected.arguments["subagent_type"], "planner-qwen")
+        self.assertTrue(prompt.startswith("FIRST read .agents_tmp/INTAKE.json."))
+        self.assertIn("together in one turn", prompt)
+        self.assertIn(exact, prompt)
+        self.assertEqual(source, "deterministic")
+
+
 if __name__ == "__main__":
     unittest.main()

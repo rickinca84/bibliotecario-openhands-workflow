@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 import test_v062_contract as existing
+import test_rizzo_openai_adapter as routing
 
 
 class WorkflowRegressionTests(unittest.TestCase):
@@ -154,6 +155,15 @@ class WorkflowRegressionTests(unittest.TestCase):
             if expected_next:
                 self.assertEqual(result["decision"], "deny")
                 self.assertIn("NEXT_WORK_ITEM_READY: " + expected_next, result["reason"])
+                selected, _, source = routing.tr.choose_next(
+                    [routing.user("Create hello.txt"),
+                     routing.assistant_task("reviewer-qwen"),
+                     routing.tool(json.dumps(result))],
+                    routing.TOOLS,
+                    chooser=lambda *_: self.fail("Prepared transition must not invoke Rizzo/Qwen"),
+                )
+                self.assertEqual(source, "deterministic")
+                self.assertEqual(selected.arguments["subagent_type"], "executor-spark")
                 self.assertEqual(self.load("WORK_GRAPH.json")["current_node_id"], expected_next)
                 self.assertEqual(self.load("CURRENT_WORK_ITEM.json")["node_id"], expected_next)
             else:
@@ -202,3 +212,63 @@ class WorkflowRegressionTests(unittest.TestCase):
                 result = self.gate("executor-spark")
                 self.assertEqual(result["decision"], "deny", result)
                 self.assertIn("vacuous", result["reason"])
+
+
+    def test_corrected_contract_executes_after_the_single_replan(self):
+        self.contract["final_validation_commands"] = []
+        self.write_bundle()
+        self.assertEqual(self.gate("executor-spark")["decision"], "deny")
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.contract["final_validation_commands"] = [self.validator()]
+        self.write_bundle()
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        self.execute()
+        self.assertEqual(self.validate()["decision"], "allow")
+        self.assertEqual(self.load("STATE.json")["contract_replans"], 1)
+        self.assertEqual(self.load("STATE.json")["planner_calls"], 2)
+        self.assertFalse((self.wd / ".agents_tmp/TERMINAL_FAILURE.json").exists())
+
+    def test_readme_change_is_authoritatively_rejected(self):
+        self.execute()
+        (self.wd / "README.md").write_text("unauthorized change")
+        result = self.validate()
+        self.assertEqual(result["decision"], "deny")
+        validation = self.load("VALIDATION.json")
+        self.assertEqual(validation["overall"], "FAIL")
+        self.assertEqual(validation["phase"], "SCOPE")
+        self.assertIn("README.md", validation["scope"]["violations"])
+
+
+    def test_prepared_read_only_checkpoint_advances_and_validates(self):
+        self.graph["nodes"].append({
+            "id": "read-only", "goal": "Verify exact bytes", "depends_on": ["a"]})
+        item = copy.deepcopy(self.work)
+        item.update(node_id="read-only", mutable_paths=[])
+        self.graph["work_items"] = {"read-only": item}
+        self.write_bundle()
+        self.execute()
+        self.assertIn("NEXT_WORK_ITEM_READY", self.validate()["reason"])
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        self.assertEqual(self.validate()["decision"], "allow")
+        self.assertEqual(self.load("STATE.json")["planner_calls"], 1)
+        self.assertEqual(self.load("VALIDATION.json")["phase"], "GLOBAL")
+
+    def test_read_only_checkpoint_rejects_even_previously_mutable_file_changes(self):
+        self.work["mutable_paths"] = []
+        self.write_bundle()
+        self.assertEqual(self.gate("executor-spark")["decision"], "allow")
+        (self.wd / "hello.txt").write_bytes(b"Bibliotecario Rizzo test")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+        self.assertEqual(self.validate()["decision"], "deny")
+        self.assertIn("hello.txt", self.load("VALIDATION.json")["scope"]["violations"])
+
+    def test_invalid_prepared_item_reason_identifies_the_node(self):
+        item = copy.deepcopy(self.work)
+        item.update(node_id="later", mutable_paths=["README.md"])
+        self.graph["nodes"].append({
+            "id": "later", "goal": "later", "depends_on": ["a"]})
+        self.graph["work_items"] = {"later": item}
+        self.write_bundle()
+        result = self.gate("executor-spark")
+        self.assertIn("WORK_GRAPH work_items[later]", result["reason"])

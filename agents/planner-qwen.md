@@ -88,13 +88,18 @@ Do not copy the full work item into a graph node.
 }
 ```
 
+For a read-only checkpoint use mutable_paths: []; every project-file change is then rejected.
+Do not add separate graph nodes for checks already covered by the current item or global validators.
+
 Both validation-command lists MUST contain 1..20 deterministic commands. Use only executables reported
 available by INTAKE. Validators must return a non-zero exit code when the checked condition is false.
 For inline Python use `assert <condition>` or `raise SystemExit(0 if <condition> else 1)`;
 never use a bare boolean expression. Never compare a file with itself using `diff` or `cmp`. If no test suite exists, use a small deterministic non-mutating check
 with an available interpreter; never invent a nonexistent test suite.
 
-On later planner calls, read the authoritative artifacts and deterministic evidence,
+On EVERY planner call, first read INTAKE.json, including contract repair and replanning.
+After intake, batch the required artifact reads together in one LLM turn, then batch
+necessary writes together. On later calls, read the authoritative artifacts and deterministic evidence,
 preserve locked CONTRACT.json and completed graph nodes, and change only future work.
 After validation failure or reviewer rejection, add only a bounded corrective node.
 
