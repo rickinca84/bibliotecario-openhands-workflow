@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import tempfile
@@ -118,11 +119,21 @@ class V063ContractTests(unittest.TestCase):
     def test_planner_is_bounded_and_context_lean(self):
         text = (ROOT / "agents" / "planner-qwen.md").read_text()
         front = text.split("---", 2)[1]
-        self.assertRegex(front, r"(?m)^max_iteration_per_run:\s*5\s*$")
+        self.assertRegex(front, r"(?m)^max_iteration_per_run:\s*12\s*$")
         self.assertRegex(front, r"(?m)^condenser:\s*none\s*$")
         self.assertNotRegex(front, r"(?m)^\s*-\s*glob\s*$")
         self.assertRegex(front, r"(?m)^\s*-\s*grep\s*$")
         self.assertIn("issue all three `write_file` calls in the same LLM turn", text)
+
+    def test_planner_budget_covers_inspection_and_plan_writes(self):
+        text = (ROOT / "agents" / "planner-qwen.md").read_text()
+        front = text.split("---", 2)[1]
+        budget = int(re.search(r"(?m)^max_iteration_per_run: (\d+)$", front).group(1))
+        # A real Luanti request used five turns on intake and inspection. The
+        # planner still needs room to write three artifacts and return a result.
+        self.assertGreaterEqual(budget, 5 + 3 + 1)
+        self.assertLessEqual(budget, 12)
+        self.assertIn("Avoid separate think calls", text)
 
     def test_planner_anchors_to_request_text_and_requires_validation_commands(self):
         text = (ROOT / "agents" / "planner-qwen.md").read_text()

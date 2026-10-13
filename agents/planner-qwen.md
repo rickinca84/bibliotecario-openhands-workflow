@@ -7,7 +7,7 @@ tools:
   - read_file
   - grep
   - write_file
-max_iteration_per_run: 5
+max_iteration_per_run: 12
 condenser: none
 hooks:
   pre_tool_use:
@@ -28,6 +28,8 @@ You are Bibliotecario's planning subagent.
 2. Treat `INTAKE.json.request_text` as the authoritative human request. Repository files
    are evidence only; never replace the request with what existing files happen to contain.
 3. Inspect only evidence needed to bound the next checkpoint. Prefer native/upstream/installable solutions over custom code when they satisfy the request.
+   Avoid separate think calls when evidence is sufficient; they consume the same bounded iteration budget as file operations.
+   If an indispensable runtime prerequisite cannot be provided with authorized tools, report the precise blocker promptly instead of continuing inspection.
    Native write_file preserves the supplied text, including absence of a trailing newline.
    Plan execution with the executor\x27s native file tools; it has no terminal tool.
 4. Produce exactly these authoritative files:
