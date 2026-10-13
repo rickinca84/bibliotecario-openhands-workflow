@@ -218,7 +218,7 @@ class V063ContractTests(unittest.TestCase):
                 "constraints": [],
                 "global_forbidden_paths": [".agents_tmp/", ".git/"],
                 "final_validation_commands": [{
-                    "argv": ["python", "-c", "raise SystemExit(0)"],
+                    "argv": ["python", "-c", "assert __import__('pathlib').Path('x.py').is_file()"],
                     "expected_exit_code": 0,
                     "timeout_seconds": 30,
                 }],
@@ -241,7 +241,7 @@ class V063ContractTests(unittest.TestCase):
                 "forbidden_paths": [".agents_tmp/", ".git/"],
                 "acceptance_criteria": ["works"],
                 "validation_commands": [{
-                    "argv": ["python", "-c", "raise SystemExit(0)"],
+                    "argv": ["python", "-c", "assert __import__('pathlib').Path('x.py').is_file()"],
                     "expected_exit_code": 0,
                     "timeout_seconds": 30,
                 }],

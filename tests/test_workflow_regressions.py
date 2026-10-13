@@ -1,0 +1,204 @@
+import copy
+import hashlib
+import json
+import pathlib
+import subprocess
+import tempfile
+import unittest
+
+import test_v062_contract as existing
+
+
+class WorkflowRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.wd = pathlib.Path(self.temp.name)
+        self.helper = existing.V063ContractTests()
+        self.hooks = self.helper.hooks()
+        subprocess.run(["git", "init", "-b", "fixture"], cwd=self.wd,
+                       check=True, capture_output=True)
+        (self.wd / "README.md").write_text("Keep this unchanged.\n")
+        subprocess.run(["git", "add", "README.md"], cwd=self.wd, check=True)
+        subprocess.run(["git", "-c", "user.name=Test", "-c",
+                        "user.email=test@example.invalid", "commit", "-m", "baseline"],
+                       cwd=self.wd, check=True, capture_output=True)
+        self.run_hook(self.hooks["session_start"][0]["hooks"][0]["command"], {})
+        self.run_hook(self.hooks["user_prompt_submit"][0]["hooks"][0]["command"],
+                      {"message": "Create hello.txt with exactly Bibliotecario Rizzo test. Keep README.md unchanged."})
+        intake = self.load("INTAKE.json")
+        self.contract = {
+            "schema_version": 1, "request_sha256": intake["request_sha256"],
+            "objective": "Create hello.txt", "acceptance_criteria": ["Exact bytes"],
+            "constraints": ["README.md unchanged"],
+            "global_forbidden_paths": [".agents_tmp/", ".git/", "README.md"],
+            "final_validation_commands": [self.validator()],
+        }
+        self.work = {
+            "schema_version": 1, "node_id": "a", "goal": "Write exact bytes",
+            "reuse_analysis": "Use native file tools",
+            "mutable_paths": ["hello.txt"],
+            "forbidden_paths": self.contract["global_forbidden_paths"],
+            "acceptance_criteria": ["Exact bytes"],
+            "validation_commands": [self.validator()],
+        }
+        self.graph = {"schema_version": 1, "current_node_id": "a",
+                      "nodes": [{"id": "a", "goal": "Write exact bytes", "depends_on": []}]}
+        self.write_bundle()
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+
+    def validator(self):
+        digest = hashlib.sha256((self.wd / "README.md").read_bytes()).hexdigest()
+        return {"argv": ["python3", "-c",
+                "from pathlib import Path; import hashlib; "
+                "assert Path('hello.txt').read_bytes() == b'Bibliotecario Rizzo test'; "
+                f"assert hashlib.sha256(Path('README.md').read_bytes()).hexdigest() == '{digest}'"],
+                "expected_exit_code": 0, "timeout_seconds": 10}
+
+    def run_hook(self, command, payload):
+        result = self.helper.run_hook(command, {"working_dir": str(self.wd), **payload}, self.wd)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout or "{}")
+
+    def load(self, name):
+        return json.loads((self.wd / ".agents_tmp" / name).read_text())
+
+    def save(self, name, value):
+        (self.wd / ".agents_tmp" / name).write_text(json.dumps(value))
+
+    def write_bundle(self):
+        for name, value in (("CONTRACT.json", self.contract),
+                            ("WORK_GRAPH.json", self.graph),
+                            ("CURRENT_WORK_ITEM.json", self.work)):
+            self.save(name, value)
+
+    def gate(self, agent):
+        return self.run_hook(self.helper.task_hooks()[0]["command"],
+                             {"tool_input": {"subagent_type": agent}})
+
+    def post(self, agent, text):
+        command = self.hooks["post_tool_use"][0]["hooks"][0]["command"]
+        return self.run_hook(command, {"tool_input": {"subagent_type": agent},
+                             "tool_response": {"status": "completed", "text": text}})
+
+    def execute(self):
+        result = self.gate("executor-spark")
+        self.assertEqual(result["decision"], "allow", result)
+        (self.wd / "hello.txt").write_bytes(b"Bibliotecario Rizzo test")
+        self.post("executor-spark", "EXECUTION_RESULT: READY_FOR_VALIDATION")
+
+    def validate(self):
+        result = self.gate("reviewer-qwen")
+        self.assertEqual(result["decision"], "allow", result)
+        return self.run_hook(self.helper.task_hooks()[1]["command"],
+                             {"tool_input": {"subagent_type": "reviewer-qwen"}})
+
+    def test_invalid_contract_allows_only_one_replan_and_keeps_exact_reason(self):
+        self.contract["final_validation_commands"] = []
+        self.write_bundle()
+        first = self.gate("executor-spark")
+        reason = self.load("PLANNER_RESULT.json")["reason"]
+        self.assertIn(reason, first["reason"])
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        second = self.gate("executor-spark")
+        self.assertEqual(second["decision"], "deny")
+        self.assertTrue((self.wd / ".agents_tmp/TERMINAL_FAILURE.json").is_file())
+        self.assertIn(reason, self.load("TERMINAL_FAILURE.json")["reason"])
+        self.assertIn("BIBLIOTECARIO_FAILURE:", second["additionalContext"])
+        self.assertEqual(self.gate("planner-qwen")["decision"], "deny")
+        self.assertEqual(self.load("STATE.json")["planner_calls"], 2)
+        self.assertEqual(self.load("STATE.json")["executor_calls"], 0)
+
+    def test_rejects_vacuous_success_even_when_fail_token_is_present(self):
+        scripts = (
+            "assert True",
+            "assert 1 == 1",
+            "assert len('constant')",
+            "ok = True; assert ok",
+            "raise SystemExit(0)",
+            "import sys; sys.exit(0)",
+            "# assert False\nprint('ok')",
+            "from pathlib import Path; assert True or Path('hello.txt').exists()",
+        )
+        initial_state = self.load("STATE.json")
+        for script in scripts:
+            with self.subTest(script=script):
+                self.save("STATE.json", initial_state)
+                for name in ("TERMINAL_FAILURE.json", "EXECUTION_BASELINE.json"):
+                    (self.wd / ".agents_tmp" / name).unlink(missing_ok=True)
+                self.contract["final_validation_commands"] = [
+                    {"argv": ["python3", "-c", script],
+                     "expected_exit_code": 0, "timeout_seconds": 10}]
+                self.write_bundle()
+                self.save("PLANNER_RESULT.json", {"verdict": "READY"})
+                result = self.gate("executor-spark")
+                self.assertEqual(result["decision"], "deny", result)
+                self.assertIn("validator", result["reason"])
+
+    def test_cached_dependency_ready_items_advance_without_planner(self):
+        self.graph["nodes"] += [
+            {"id": "z", "goal": "Verify unchanged README", "depends_on": ["a"]},
+            {"id": "b", "goal": "Verify exact bytes", "depends_on": ["a"]},
+        ]
+        self.graph["work_items"] = {}
+        for nid in ("z", "b"):
+            item = copy.deepcopy(self.work)
+            item["node_id"] = nid
+            self.graph["work_items"][nid] = item
+        self.write_bundle()
+        for expected_next in ("b", "z", None):
+            self.execute()
+            result = self.validate()
+            if expected_next:
+                self.assertEqual(result["decision"], "deny")
+                self.assertIn("NEXT_WORK_ITEM_READY: " + expected_next, result["reason"])
+                self.assertEqual(self.load("WORK_GRAPH.json")["current_node_id"], expected_next)
+                self.assertEqual(self.load("CURRENT_WORK_ITEM.json")["node_id"], expected_next)
+            else:
+                self.assertEqual(result["decision"], "allow", result)
+        state = self.load("STATE.json")
+        self.assertEqual(state["planner_calls"], 1)
+        self.assertEqual(state["executor_calls"], 3)
+        self.assertEqual(state["reviewer_calls"], 1)
+        self.assertEqual(state["deterministic_advances"], 2)
+        validation = self.load("VALIDATION.json")
+        self.assertEqual(validation["overall"], "PASS")
+        self.assertEqual(validation["phase"], "GLOBAL")
+        self.assertTrue(validation["graph_complete"])
+
+    def test_invalid_cached_scope_is_rejected_before_first_executor(self):
+        item = copy.deepcopy(self.work)
+        item["node_id"] = "b"
+        item["mutable_paths"] = ["README.md"]
+        self.graph["nodes"].append({"id": "b", "goal": "later", "depends_on": ["a"]})
+        self.graph["work_items"] = {"b": item}
+        self.write_bundle()
+        result = self.gate("executor-spark")
+        self.assertEqual(result["decision"], "deny", result)
+        self.assertEqual(self.load("STATE.json")["executor_calls"], 0)
+
+    def test_wrong_file_bytes_really_fail_deterministic_validation(self):
+        self.execute()
+        (self.wd / "hello.txt").write_bytes(b"wrong")
+        result = self.validate()
+        self.assertEqual(result["decision"], "deny")
+        validation = self.load("VALIDATION.json")
+        self.assertEqual(validation["overall"], "FAIL")
+        self.assertNotEqual(validation["work_item_commands"][0]["exit_code"], 0)
+
+
+    def test_node_unconditional_success_is_rejected(self):
+        for script in ("process.exit(0)", "require('assert')(true); // assert(true)",
+                       "assert(true)"):
+            with self.subTest(script=script):
+                self.contract["final_validation_commands"] = [{
+                    "argv": ["node", "-e", script],
+                    "expected_exit_code": 0, "timeout_seconds": 10,
+                }]
+                self.write_bundle()
+                self.save("PLANNER_RESULT.json", {"verdict": "READY"})
+                result = self.gate("executor-spark")
+                self.assertEqual(result["decision"], "deny", result)
+                self.assertIn("vacuous", result["reason"])

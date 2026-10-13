@@ -121,7 +121,7 @@ def _evidence_text(messages: list[dict[str, Any]], limit: int = 32000) -> str:
             continue
         text = _content_text(message.get("content")).strip()
         if text:
-            chunks.append(f"[{role}] {text}")
+            chunks.append(f"[{role}]\n{text}")
     return "\n".join(chunks)[-limit:]
 
 
@@ -136,13 +136,29 @@ def _extract_contract_invalid(evidence: str) -> str | None:
 
 
 def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    evidence = _evidence_text(messages)
+    # A new human request starts a new workflow. Within it, only the latest
+    # task's tool observations describe the current phase: older rejections and
+    # retry directives must not become permanent routing instructions.
+    request_start = 0
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            request_start = index + 1
+    workflow_messages = messages[request_start:]
+    phase_start = 0
+    for index, message in enumerate(workflow_messages):
+        if _assistant_task_calls([message]):
+            phase_start = index + 1
+    phase_observations = [
+        message for message in workflow_messages[phase_start:]
+        if isinstance(message, dict) and message.get("role") == "tool"
+    ]
+    evidence = _evidence_text(phase_observations)
     lower = evidence.lower()
-    calls = _assistant_task_calls(messages)
+    calls = _assistant_task_calls(workflow_messages)
     last = calls[-1] if calls else None
 
-    approved = bool(re.search(r"(?mi)^\s*APPROVED\s*$", evidence))
-    rejected = bool(re.search(r"(?mi)^\s*REJECTED\b", evidence))
+    approved = last == "reviewer-qwen" and bool(re.search(r"(?mi)^\s*APPROVED\s*$", evidence))
+    rejected = last == "reviewer-qwen" and bool(re.search(r"(?mi)^\s*REJECTED\b", evidence))
     replan_required = "REPLAN_REQUIRED" in evidence
 
     retry_executor = any(
@@ -192,6 +208,7 @@ def derive_state(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "retry_executor": retry_executor,
         "planner_directive": planner_directive,
         "reviewer_allowed": reviewer_allowed,
+        "next_work_item_ready": "NEXT_WORK_ITEM_READY:" in evidence,
         "contract_invalid": contract_invalid,
         "failure_message": _extract_failure_message(evidence),
         "evidence_tail": evidence[-6000:],
@@ -277,6 +294,19 @@ def deterministic_candidates(
                     "the authoritative planning artifacts. Human request:\n\n" + human
                 ),
                 "Bootstrap the free-form request through the capable Qwen planner.",
+            )
+        ]
+
+    if state.get("next_work_item_ready"):
+        return [
+            _task(
+                "executor-spark",
+                (
+                    "Execute the dependency-ready CURRENT_WORK_ITEM.json selected and "
+                    "validated by the deterministic parent hook. Read CONTRACT.json and "
+                    "CURRENT_WORK_ITEM.json first; preserve the bounded scope."
+                ),
+                "Execute the prepared dependency-ready node without another planner call.",
             )
         ]
 

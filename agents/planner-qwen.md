@@ -62,6 +62,16 @@ Required schemas:
 ```
 Every graph node contains ONLY `id`, `goal`, and `depends_on`.
 
+When later checkpoints are already fully specified without new semantic decisions,
+add an optional outer work_items object to WORK_GRAPH.json, mapping each such node
+ID to its complete CURRENT_WORK_ITEM schema below. Prepare these items during the
+initial planning call; do not invent details that depend on future discoveries.
+The parent validates every prepared item before execution, then chooses the
+lexicographically first prepared dependency-ready incomplete node after each local
+PASS. It writes CURRENT_WORK_ITEM.json and advances the graph without calling Qwen.
+Nodes needing new semantic decisions retain the normal bounded planner transition.
+Do not copy the full work item into a graph node.
+
 `CURRENT_WORK_ITEM.json`
 ```json
 {
