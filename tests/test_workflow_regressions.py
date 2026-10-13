@@ -301,3 +301,41 @@ class WorkflowRegressionTests(unittest.TestCase):
             "content": json.dumps(self.contract),
         }})
         self.assertEqual(good["decision"], "allow", good)
+
+
+    def test_terminal_failure_closes_from_reason_only_sdk_observation(self):
+        self.contract["final_validation_commands"] = []
+        self.write_bundle()
+        self.assertEqual(self.gate("executor-spark")["decision"], "deny")
+        self.assertEqual(self.gate("planner-qwen")["decision"], "allow")
+        self.post("planner-qwen", "PLANNING_RESULT: READY")
+        denied = self.gate("executor-spark")
+        expected = "BIBLIOTECARIO_FAILURE: contract: " + self.load("TERMINAL_FAILURE.json")["reason"]
+        self.assertEqual(denied["reason"], expected)
+        selected, _, source = routing.tr.choose_next(
+            [routing.user("Create hello.txt"),
+             routing.assistant_task("executor-spark"),
+             routing.tool("Tool call blocked by hook: " + denied["reason"])],
+            routing.TOOLS, chooser=lambda *_: self.fail("Terminal failure is deterministic"))
+        self.assertEqual(selected.tool, "finish")
+        self.assertEqual(selected.arguments["message"], expected)
+        self.assertEqual(source, "deterministic")
+        payload = {"tool_name": "finish", "tool_input": selected.arguments}
+        self.assertEqual(self.run_hook(self.helper.finish_hook(), payload)["decision"], "allow")
+        self.run_hook(self.helper.post_finish_hook(), payload)
+        self.assertEqual(self.run_hook(self.helper.stop_hook(), {})["decision"], "allow")
+        self.assertEqual(self.load("STATE.json")["planner_calls"], 2)
+
+    def test_planner_rejects_invalid_inline_python_before_native_write(self):
+        text = (existing.ROOT / "agents/planner-qwen.md").read_text()
+        command = json.loads(next(re.finditer(r'^\s*- command: (".*")$', text, re.M)).group(1))
+        self.save("PLANNER_INTAKE_READ.json", {"session_id": "repair"})
+        self.contract["final_validation_commands"][0]["argv"][2] = "assert b'broken\n' == b'broken'"
+        result = self.run_hook(command, {
+            "session_id": "repair", "tool_name": "write_file",
+            "tool_input": {"file_path": ".agents_tmp/CONTRACT.json",
+                           "content": json.dumps(self.contract)},
+        })
+        self.assertEqual(result["decision"], "deny")
+        self.assertIn("CONTRACT.json validator invalid Python at line 1", result["reason"])
+        self.assertIn("unterminated string literal", result["reason"])
